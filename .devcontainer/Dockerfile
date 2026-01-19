@@ -9,7 +9,9 @@ ARG CLAUDE_CODE_VERSION=latest
 
 ENV TZ=${TZ} \
     DEBIAN_FRONTEND=noninteractive \
-    CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
+    CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
+    NODE_PATH=/usr/local/lib/node_modules \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 
 # Install base dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,12 +51,19 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64
+# Set JAVA_HOME (create symlink for architecture independence)
+RUN ln -s /usr/lib/jvm/temurin-21-jdk-* /usr/lib/jvm/temurin-21-jdk
+ENV JAVA_HOME=/usr/lib/jvm/temurin-21-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+
+# Install Playwright globally with Chromium headless shell (for arm64/amd64)
+RUN npm install -g playwright \
+    && mkdir -p /opt/playwright-browsers \
+    && npx playwright install --with-deps --only-shell chromium \
+    && chmod -R 755 /opt/playwright-browsers
 
 # Configure node user with sudo access
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/node \
