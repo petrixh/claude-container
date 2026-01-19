@@ -6,13 +6,16 @@ A Docker devcontainer for running Claude Code in a sandboxed environment with:
 - Playwright with headless Chromium (arm64/amd64)
 - GitHub CLI with PAT authentication
 - Domain-whitelist firewall (default deny)
-- Bind-mounted `~/.claude` for subscription authentication
+- Configurable Claude config directory for subscription authentication
 
 ## Prerequisites
 
 Before running the container, ensure:
 
-1. **Claude subscription credentials** exist at `~/.claude` on your host machine
+1. **Claude config directory** exists on your Docker host for persisting authentication:
+   ```bash
+   mkdir -p /path/to/claude-container-config
+   ```
 2. **GitHub PAT** (optional) - set the `GH_TOKEN` environment variable:
    ```bash
    export GH_TOKEN=ghp_your_token_here
@@ -47,12 +50,13 @@ docker compose down
 docker run -it --rm \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
-  -v "$HOME/.claude:/home/node/.claude:cached" \
-  -v "$(pwd):/workspace:delegated" \
-  -e GH_TOKEN="$GH_TOKEN" \
+  -v "/path/to/claude-container-config:/claude-container-config" \
+  -e CLAUDE_CONFIG_DIR="/claude-container-config" \
   -w /workspace \
   claude-container
 ```
+
+> **Note:** The `CLAUDE_CONFIG_DIR` environment variable tells Claude where to store authentication credentials. Mount a host directory to persist login across container restarts.
 
 ### Option 3: Run a One-Off Claude Prompt
 
@@ -62,38 +66,11 @@ Execute a single prompt and exit:
 docker run -it --rm \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
-  -v "$HOME/.claude:/home/node/.claude:cached" \
-  -v "$(pwd):/workspace:delegated" \
-  -e GH_TOKEN="$GH_TOKEN" \
+  -v "/path/to/claude-container-config:/claude-container-config" \
+  -e CLAUDE_CONFIG_DIR="/claude-container-config" \
   -w /workspace \
   claude-container \
   claude -p "Your prompt here"
-```
-
-**Example - Ask Claude to explain a file:**
-
-```bash
-docker run -it --rm \
-  --cap-add=NET_ADMIN \
-  --cap-add=NET_RAW \
-  -v "$HOME/.claude:/home/node/.claude:cached" \
-  -v "$(pwd):/workspace:delegated" \
-  -w /workspace \
-  claude-container \
-  claude -p "Explain what this project does based on the files in /workspace"
-```
-
-**Example - Generate code:**
-
-```bash
-docker run -it --rm \
-  --cap-add=NET_ADMIN \
-  --cap-add=NET_RAW \
-  -v "$HOME/.claude:/home/node/.claude:cached" \
-  -v "$(pwd):/workspace:delegated" \
-  -w /workspace \
-  claude-container \
-  claude -p "Create a hello world Python script in /workspace/hello.py"
 ```
 
 ## VS Code Dev Container
@@ -124,7 +101,8 @@ docker run -it --rm \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
   -v "/path/to/your/allowed-domains.conf:/usr/local/etc/allowed-domains.conf:ro" \
-  -v "$HOME/.claude:/home/node/.claude:cached" \
+  -v "/path/to/claude-container-config:/claude-container-config" \
+  -e CLAUDE_CONFIG_DIR="/claude-container-config" \
   claude-container
 ```
 
@@ -136,13 +114,6 @@ cp .devcontainer/allowed-domains.conf ~/my-allowed-domains.conf
 
 # Edit to add your domains
 echo "example.com" >> ~/my-allowed-domains.conf
-
-# Mount your custom config
-docker run -it --rm \
-  --cap-add=NET_ADMIN \
-  --cap-add=NET_RAW \
-  -v "$HOME/my-allowed-domains.conf:/usr/local/etc/allowed-domains.conf:ro" \
-  claude-container
 ```
 
 ### Runtime Firewall Commands
@@ -161,6 +132,7 @@ firewall-reload
 
 | Variable | Description |
 |----------|-------------|
+| `CLAUDE_CONFIG_DIR` | Directory for Claude authentication and config (mount from host for persistence) |
 | `GH_TOKEN` | GitHub Personal Access Token for `gh` CLI authentication |
 | `TZ` | Timezone (default: `America/Los_Angeles`) |
 | `CLAUDE_CODE_VERSION` | Claude Code version to install (default: `latest`) |
@@ -175,4 +147,18 @@ docker compose build --no-cache
 
 # Docker directly
 docker build --no-cache -t claude-container .devcontainer/
+```
+
+## Quick Reference (Docker Remote)
+
+For Docker remote setups where the Docker daemon runs on a separate host, use absolute paths on the Docker host:
+
+```bash
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  -v "/home/deb/claude-container-config:/claude-container-config" \
+  -w /workspace \
+  -e CLAUDE_CONFIG_DIR="/claude-container-config" \
+  claude-container
 ```
