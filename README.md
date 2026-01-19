@@ -3,6 +3,7 @@
 A Docker devcontainer for running Claude Code in a sandboxed environment with:
 - Node.js 20
 - Java 21 (Eclipse Temurin)
+- Playwright with headless Chromium (arm64/amd64)
 - GitHub CLI with PAT authentication
 - Domain-whitelist firewall (default deny)
 - Bind-mounted `~/.claude` for subscription authentication
@@ -111,6 +112,7 @@ The container uses a domain-whitelist firewall that blocks all outbound traffic 
 - `registry.npmjs.org` - NPM packages
 - `github.com`, `api.github.com` - GitHub
 - `repo1.maven.org`, `repo.maven.apache.org` - Maven Central
+- `playwright.azureedge.net` - Playwright browser downloads
 - VS Code marketplace domains
 
 ### Customizing the Domain Whitelist
