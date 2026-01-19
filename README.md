@@ -31,13 +31,13 @@ Start an interactive development environment:
 
 ```bash
 # Start container in background and attach
-docker-compose up -d && docker-compose exec claude zsh
+docker compose up -d && docker compose exec claude zsh
 
 # Or start and attach directly (container removed on exit)
-docker-compose run --rm claude
+docker compose run --rm claude
 
 # Stop the container
-docker-compose down
+docker compose down
 ```
 
 ### Option 2: Interactive Shell (Docker Run)
@@ -169,7 +169,7 @@ After modifying the Dockerfile:
 
 ```bash
 # Docker Compose
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # Docker directly
 docker build --no-cache -t claude-container .devcontainer/
