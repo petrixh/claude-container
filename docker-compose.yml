@@ -1,0 +1,28 @@
+services:
+  claude:
+    build:
+      context: .devcontainer
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-America/Los_Angeles}
+        CLAUDE_CODE_VERSION: latest
+    container_name: claude-container
+    hostname: claude-dev
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ${HOME}/.claude:/home/node/.claude:cached
+      - ./:/workspace:delegated
+      - claude-bashhistory:/commandhistory
+    environment:
+      - GH_TOKEN=${GH_TOKEN}
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - CLAUDE_CONFIG_DIR=/home/node/.claude
+      - DEVCONTAINER=true
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+volumes:
+  claude-bashhistory:
