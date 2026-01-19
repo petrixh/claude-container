@@ -103,29 +103,57 @@ docker run -it --rm \
 
 ## Firewall Configuration
 
-The container uses a domain-whitelist firewall that blocks all outbound traffic except to approved domains.
-
-**View allowed domains:**
-```bash
-cat .devcontainer/allowed-domains.conf
-```
-
-**Add a new domain:**
-1. Edit `.devcontainer/allowed-domains.conf`
-2. Run `firewall-reload` inside the container
-
-**Check firewall status:**
-```bash
-firewall-status
-```
+The container uses a domain-whitelist firewall that blocks all outbound traffic except to approved domains. A default whitelist is baked into the image at `/usr/local/etc/allowed-domains.conf`.
 
 ### Default Allowed Domains
 
 - `api.anthropic.com` - Claude API
 - `registry.npmjs.org` - NPM packages
 - `github.com`, `api.github.com` - GitHub
-- `repo1.maven.org` - Maven Central
+- `repo1.maven.org`, `repo.maven.apache.org` - Maven Central
 - VS Code marketplace domains
+
+### Customizing the Domain Whitelist
+
+To use your own domain whitelist, bind mount a custom config file:
+
+```bash
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  -v "/path/to/your/allowed-domains.conf:/usr/local/etc/allowed-domains.conf:ro" \
+  -v "$HOME/.claude:/home/node/.claude:cached" \
+  claude-container
+```
+
+Or copy the default config and modify it:
+
+```bash
+# Copy from this repo
+cp .devcontainer/allowed-domains.conf ~/my-allowed-domains.conf
+
+# Edit to add your domains
+echo "example.com" >> ~/my-allowed-domains.conf
+
+# Mount your custom config
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  -v "$HOME/my-allowed-domains.conf:/usr/local/etc/allowed-domains.conf:ro" \
+  claude-container
+```
+
+### Runtime Firewall Commands
+
+Inside the container:
+
+```bash
+# View current firewall rules
+firewall-status
+
+# Reload firewall after editing the config
+firewall-reload
+```
 
 ## Environment Variables
 

@@ -82,6 +82,7 @@ USER root
 # Copy firewall and entrypoint scripts
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
 RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh
 
 # Set working directory
