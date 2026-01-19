@@ -134,7 +134,7 @@ firewall-reload
 |----------|-------------|
 | `CLAUDE_CONFIG_DIR` | Directory for Claude authentication and config (mount from host for persistence) |
 | `GH_TOKEN` | GitHub Personal Access Token for `gh` CLI authentication |
-| `TZ` | Timezone (default: `America/Los_Angeles`) |
+| `TZ` | Timezone (default: `Europe/Helsinki`). Pass `-e TZ=$TZ` to inherit from host |
 | `CLAUDE_CODE_VERSION` | Claude Code version to install (default: `latest`) |
 
 ## Rebuilding

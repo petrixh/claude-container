@@ -4,7 +4,7 @@ services:
       context: .devcontainer
       dockerfile: Dockerfile
       args:
-        TZ: ${TZ:-America/Los_Angeles}
+        TZ: ${TZ:-Europe/Helsinki}
         CLAUDE_CODE_VERSION: latest
     container_name: claude-container
     hostname: claude-dev
@@ -16,6 +16,7 @@ services:
       - ./:/workspace:delegated
       - claude-bashhistory:/commandhistory
     environment:
+      - TZ=${TZ:-Europe/Helsinki}
       - GH_TOKEN=${GH_TOKEN}
       - NODE_OPTIONS=--max-old-space-size=4096
       - CLAUDE_CONFIG_DIR=/home/node/.claude

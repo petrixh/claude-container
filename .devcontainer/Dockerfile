@@ -4,7 +4,7 @@
 ARG NODE_VERSION=20
 FROM node:${NODE_VERSION}-bookworm
 
-ARG TZ=America/Los_Angeles
+ARG TZ=Europe/Helsinki
 ARG CLAUDE_CODE_VERSION=latest
 
 ENV TZ=${TZ} \
