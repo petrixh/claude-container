@@ -24,29 +24,68 @@ Before running the container, ensure:
 
 ## Container Variants
 
-This repository provides two container variants:
+This repository provides three container variants:
 
-### Base Variant (Default)
-The standard Claude Code container without Docker support. Use this for general development tasks.
+| Variant | Size | Docker | Best For | Limitations |
+|---------|------|--------|----------|-------------|
+| **`claude`** (base) | 3.47GB | ❌ No | General Claude Code development | No Docker support |
+| **`claude-docker-host`** ⭐ | 3.92GB | ✅ Via host | Docker development, testing | Requires host Docker |
+| **`claude-dind`** | 3.92GB | ✅ Isolated | Secure isolation, CI/CD | Firewall blocks Docker Hub |
 
-### DinD Variant (Docker-in-Docker)
-Includes Docker CLI and daemon for containerized development workflows. Choose between:
-- **Separate daemon** (`claude-dind`): Runs isolated Docker daemon inside container
-- **Host socket** (`claude-docker-host`): Mounts host Docker socket for shared resources
+### Quick Decision Guide
+
+**Choose `claude` (base) if:**
+- You don't need Docker inside the container
+- You want the smallest, fastest container
+
+**Choose `claude-docker-host` if:** ⭐ RECOMMENDED for Docker work
+- You need Docker and have Docker on your host
+- You want to pull from Docker Hub
+- You want lower resource usage
+
+**Choose `claude-dind` if:**
+- You need complete isolation from host Docker
+- You're testing untrusted code
+- You're willing to work around firewall limitations
 
 ## Quick Start
 
-### Build the Image
+### Most Common Use Cases
+
+**Standard Claude Code Development (no Docker):**
+```bash
+docker compose up -d claude
+docker compose exec claude zsh
+claude --version
+```
+
+**Docker Development (recommended):**
+```bash
+docker compose up -d claude-docker-host
+docker compose exec claude-docker-host zsh
+docker pull alpine  # Works without firewall issues!
+```
+
+**Isolated Docker Environment:**
+```bash
+docker compose up -d claude-dind
+docker compose exec claude-dind zsh
+# Note: Docker Hub pulls blocked by firewall - see Known Limitations
+```
+
+### Build the Images
 
 ```bash
 # Base variant (default)
 docker build -t claude-container:base --target base .devcontainer/
 
-# DinD variant
+# DinD variant (both claude-dind and claude-docker-host use this)
 docker build -t claude-container:dind --target dind .devcontainer/
 ```
 
-### Option 1: Interactive Shell (Docker Compose)
+### Interactive Shell Options
+
+#### Option 1: Docker Compose (Recommended)
 
 Start an interactive development environment:
 
@@ -118,19 +157,36 @@ mv .devcontainer/devcontainer-dind.json .devcontainer/devcontainer.json
 
 ## Docker-in-Docker Usage
 
+> **⚠️ Important:** The `claude-dind` variant's firewall blocks Docker Hub image pulls due to dynamic CDN domains. For Docker development with image pulling, use the `claude-docker-host` variant instead. See [Known Limitations](#known-limitations-and-workarounds) for details.
+
 ### When to Use Each Variant
 
-**Separate Daemon (`claude-dind`)**
-- Full isolation from host Docker
-- Persistent Docker cache in container
-- Requires privileged mode
-- Higher resource usage
+**Base Variant (`claude`)** - Recommended for most users
+- ✅ Standard Claude Code development
+- ✅ No Docker needed
+- ✅ Smaller image size (3.47GB)
+- ✅ Faster startup (~2 seconds)
+- ✅ Lower resource usage
+- Use when: You don't need Docker inside the container
 
-**Host Socket (`claude-docker-host`)**
-- Shares host Docker daemon
-- Lower resource usage
-- Simpler setup
-- Can affect host Docker state
+**Host Socket Variant (`claude-docker-host`)** - Recommended for Docker development
+- ✅ Access to Docker without firewall issues
+- ✅ Shares host Docker daemon and images
+- ✅ Lower resource usage than separate daemon
+- ✅ No privileged mode required
+- ⚠️  Can affect host Docker state
+- ⚠️  Requires host Docker installation
+- Use when: You need Docker and trust your environment
+
+**Separate Daemon Variant (`claude-dind`)** - For isolated environments
+- ✅ Full isolation from host Docker
+- ✅ Persistent Docker cache in container
+- ✅ Works without host Docker
+- ⚠️  Requires privileged mode
+- ⚠️  Higher resource usage (+100-200MB RAM)
+- ⚠️  Docker Hub pulls blocked by firewall
+- ⚠️  Slower startup (~8 seconds)
+- Use when: You need isolated Docker or untrusted code testing
 
 ### Testing Docker Inside Container
 
@@ -142,15 +198,85 @@ docker compose exec claude-dind zsh
 docker version
 docker compose version
 
-# Pull and run test image
-docker pull hello-world
-docker run hello-world
+# Note: Docker Hub image pulls may be blocked by firewall
+# See "Known Limitations" section below for workarounds
+```
 
-# Build a test image
-echo 'FROM alpine' > Dockerfile.test
-echo 'RUN echo "test"' >> Dockerfile.test
-docker build -f Dockerfile.test -t test .
-docker run test
+### Known Limitations and Workarounds
+
+#### Docker Hub Image Pulls with Firewall
+
+**Issue:** Docker Hub now uses Cloudflare R2 storage with dynamic subdomains that cannot be whitelisted by domain name. Image pulls will timeout when the firewall is enabled.
+
+**Symptoms:**
+```
+failed to do request: Get "https://docker-images-prod.*.r2.cloudflarestorage.com/...":
+dial tcp 172.64.66.1:443: i/o timeout
+```
+
+**Workarounds:**
+
+**Option 1: Disable Firewall for DinD Container**
+```bash
+# Method A: Skip firewall initialization
+docker run -it --rm --privileged \
+  -e SKIP_FIREWALL=1 \
+  claude-container:dind
+
+# Method B: Run with permissive OUTPUT policy
+docker run -it --rm --privileged \
+  claude-container:dind bash -c \
+  "sudo iptables -P OUTPUT ACCEPT && exec zsh"
+```
+
+**Option 2: Use Host Docker Socket (Recommended)**
+
+The `claude-docker-host` variant mounts the host's Docker socket, bypassing the firewall issue:
+```bash
+docker compose up -d claude-docker-host
+docker compose exec claude-docker-host zsh
+
+# Now use host's Docker (images, containers shared with host)
+docker pull alpine
+docker images  # Shows host images
+```
+
+**Option 3: Pre-pull Images on Host**
+
+Pull images on your host machine, then they're available inside DinD:
+```bash
+# On host
+docker pull alpine:latest
+docker pull node:20
+
+# In claude-docker-host container
+docker images  # Images available immediately
+```
+
+**Option 4: Use Local/Private Registry**
+
+Configure a local or private registry with known domain names:
+```bash
+# Add your registry to allowed-domains.conf
+echo "registry.mycompany.com" >> .devcontainer/allowed-domains.conf
+
+# Rebuild and use
+docker pull registry.mycompany.com/myimage:latest
+```
+
+**Option 5: Build Images Locally**
+
+Build images inside the container without pulling from Docker Hub:
+```bash
+# Inside DinD container
+cat > Dockerfile <<'EOF'
+FROM scratch
+COPY ./myapp /app
+CMD ["/app/myapp"]
+EOF
+
+docker build -t myapp:latest .
+docker run myapp:latest
 ```
 
 ## Firewall Configuration
@@ -211,6 +337,101 @@ firewall-reload
 | `GH_TOKEN` | GitHub Personal Access Token for `gh` CLI authentication |
 | `TZ` | Timezone (default: `Europe/Helsinki`). Pass `-e TZ=$TZ` to inherit from host |
 | `CLAUDE_CODE_VERSION` | Claude Code version to install (default: `latest`) |
+| `SKIP_FIREWALL` | Set to `1` to skip firewall initialization (useful for DinD troubleshooting) |
+| `FIREWALL_CONFIG` | Custom path to allowed-domains.conf (default: workspace or `/usr/local/etc`) |
+| `DOCKER_HOST` | Docker daemon socket (default: `unix:///var/run/docker.sock`) |
+
+## Troubleshooting
+
+### Docker Hub Pulls Timeout in DinD
+
+**Symptom:** `dial tcp 172.64.66.1:443: i/o timeout` when pulling Docker images
+
+**Solution:** Use the `claude-docker-host` variant instead, or disable the firewall:
+```bash
+# Recommended: Use host socket variant
+docker compose up -d claude-docker-host
+
+# Alternative: Disable firewall in DinD
+docker run -it --rm --privileged -e SKIP_FIREWALL=1 claude-container:dind
+```
+
+### Docker Daemon Fails to Start
+
+**Symptom:** "Error: Docker daemon failed to start"
+
+**Check logs:**
+```bash
+# Inside container
+cat /var/log/docker.log
+
+# Common issues:
+# - Missing privileged mode: Add --privileged flag
+# - Missing SYS_ADMIN capability: Add --cap-add=SYS_ADMIN
+```
+
+**Solution:** Ensure proper flags:
+```bash
+docker run --rm --privileged \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --cap-add=SYS_ADMIN \
+  claude-container:dind
+```
+
+### Firewall Blocking Required Domain
+
+**Symptom:** Connection timeouts or "Could not resolve" warnings
+
+**Check firewall status:**
+```bash
+# Inside container
+firewall-status
+
+# Check if domain is allowed
+grep "mydomain.com" /usr/local/etc/allowed-domains.conf
+```
+
+**Solution:** Add domain to whitelist:
+```bash
+# Edit allowed-domains.conf
+echo "mydomain.com" >> .devcontainer/allowed-domains.conf
+
+# Rebuild image
+docker build -t claude-container:base --target base .devcontainer/
+
+# Or reload firewall at runtime (temporary)
+# Inside container:
+echo "mydomain.com" | sudo tee -a /usr/local/etc/allowed-domains.conf
+firewall-reload
+```
+
+### Permission Denied Errors
+
+**Symptom:** "Permission denied" when accessing Docker socket
+
+**For host socket variant:**
+```bash
+# Ensure your user is in docker group on host
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Or run container with your user's UID
+docker run --rm -u $(id -u):$(getent group docker | cut -d: -f3) \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  claude-container:dind
+```
+
+### Overlay2 Storage Driver Issues
+
+**Symptom:** "invalid argument" when running nested containers
+
+**Solution:** Use a named volume for `/var/lib/docker`:
+```bash
+docker run --rm --privileged \
+  -v claude-docker-data:/var/lib/docker \
+  claude-container:dind
+```
 
 ## Rebuilding
 
