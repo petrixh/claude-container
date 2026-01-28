@@ -4,6 +4,10 @@
 
 set -e
 
+# Create log file with proper permissions
+sudo touch /var/log/docker.log
+sudo chmod 666 /var/log/docker.log
+
 # Start Docker daemon in background if not already running
 if ! pgrep dockerd > /dev/null; then
     echo "Starting Docker daemon..."
