@@ -7,6 +7,7 @@ A Docker devcontainer for running Claude Code in a sandboxed environment with:
 - GitHub CLI with PAT authentication
 - Domain-whitelist firewall (default deny)
 - Configurable Claude config directory for subscription authentication
+- Optional Docker-in-Docker (DinD) support for containerized development
 
 ## Prerequisites
 
@@ -21,12 +22,28 @@ Before running the container, ensure:
    export GH_TOKEN=ghp_your_token_here
    ```
 
+## Container Variants
+
+This repository provides two container variants:
+
+### Base Variant (Default)
+The standard Claude Code container without Docker support. Use this for general development tasks.
+
+### DinD Variant (Docker-in-Docker)
+Includes Docker CLI and daemon for containerized development workflows. Choose between:
+- **Separate daemon** (`claude-dind`): Runs isolated Docker daemon inside container
+- **Host socket** (`claude-docker-host`): Mounts host Docker socket for shared resources
+
 ## Quick Start
 
 ### Build the Image
 
 ```bash
-docker build -t claude-container .devcontainer/
+# Base variant (default)
+docker build -t claude-container:base --target base .devcontainer/
+
+# DinD variant
+docker build -t claude-container:dind --target dind .devcontainer/
 ```
 
 ### Option 1: Interactive Shell (Docker Compose)
@@ -42,6 +59,12 @@ docker compose run --rm claude
 
 # Stop the container
 docker compose down
+
+# DinD variant with separate Docker daemon
+docker compose up -d claude-dind && docker compose exec claude-dind zsh
+
+# DinD variant mounting host Docker socket
+docker compose up -d claude-docker-host && docker compose exec claude-docker-host zsh
 ```
 
 ### Option 2: Interactive Shell (Docker Run)
@@ -75,9 +98,60 @@ docker run -it --rm \
 
 ## VS Code Dev Container
 
+### Base Variant
 1. Open this repository in VS Code
 2. Install the "Dev Containers" extension
 3. Run **"Dev Containers: Reopen in Container"** from the command palette
+
+### DinD Variant
+Use the alternative configuration for Docker-in-Docker support:
+
+```bash
+# Using devcontainer CLI
+devcontainer up --workspace-folder . \
+  --config .devcontainer/devcontainer-dind.json
+
+# Or rename the config (backup original first)
+mv .devcontainer/devcontainer.json .devcontainer/devcontainer-base.json
+mv .devcontainer/devcontainer-dind.json .devcontainer/devcontainer.json
+```
+
+## Docker-in-Docker Usage
+
+### When to Use Each Variant
+
+**Separate Daemon (`claude-dind`)**
+- Full isolation from host Docker
+- Persistent Docker cache in container
+- Requires privileged mode
+- Higher resource usage
+
+**Host Socket (`claude-docker-host`)**
+- Shares host Docker daemon
+- Lower resource usage
+- Simpler setup
+- Can affect host Docker state
+
+### Testing Docker Inside Container
+
+```bash
+# Enter DinD container
+docker compose exec claude-dind zsh
+
+# Verify Docker installation
+docker version
+docker compose version
+
+# Pull and run test image
+docker pull hello-world
+docker run hello-world
+
+# Build a test image
+echo 'FROM alpine' > Dockerfile.test
+echo 'RUN echo "test"' >> Dockerfile.test
+docker build -f Dockerfile.test -t test .
+docker run test
+```
 
 ## Firewall Configuration
 
@@ -91,6 +165,7 @@ The container uses a domain-whitelist firewall that blocks all outbound traffic 
 - `repo1.maven.org`, `repo.maven.apache.org` - Maven Central
 - `playwright.azureedge.net` - Playwright browser downloads
 - VS Code marketplace domains
+- `registry-1.docker.io`, `auth.docker.io` - Docker Hub (DinD variant)
 
 ### Customizing the Domain Whitelist
 
@@ -142,11 +217,16 @@ firewall-reload
 After modifying the Dockerfile:
 
 ```bash
-# Docker Compose
-docker compose build --no-cache
+# Docker Compose (base variant)
+docker compose build --no-cache claude
+
+# Docker Compose (DinD variants)
+docker compose build --no-cache claude-dind
+docker compose build --no-cache claude-docker-host
 
 # Docker directly
-docker build --no-cache -t claude-container .devcontainer/
+docker build --no-cache -t claude-container:base --target base .devcontainer/
+docker build --no-cache -t claude-container:dind --target dind .devcontainer/
 ```
 
 ## Quick Reference (Docker Remote)

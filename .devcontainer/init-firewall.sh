@@ -31,6 +31,16 @@ iptables -P OUTPUT DROP
 # Allow loopback
 iptables -A OUTPUT -o lo -j ACCEPT
 
+# Allow Docker bridge network (for DinD variant)
+if ip link show docker0 2>/dev/null; then
+    iptables -A OUTPUT -o docker0 -j ACCEPT
+    echo "Allowing Docker bridge network (docker0)"
+fi
+
+# Allow Docker container networks
+iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT
+iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT
+
 # Allow established connections
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 

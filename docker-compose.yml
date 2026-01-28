@@ -1,4 +1,5 @@
 services:
+  # === Base variant (current container) ===
   claude:
     build:
       context: .devcontainer
@@ -6,6 +7,8 @@ services:
       args:
         TZ: ${TZ:-Europe/Helsinki}
         CLAUDE_CODE_VERSION: latest
+        VARIANT: base
+      target: base
     container_name: claude-container
     hostname: claude-dev
     cap_add:
@@ -25,5 +28,72 @@ services:
     stdin_open: true
     tty: true
 
+  # === DinD variant (separate Docker daemon) ===
+  claude-dind:
+    build:
+      context: .devcontainer
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-Europe/Helsinki}
+        CLAUDE_CODE_VERSION: latest
+        VARIANT: dind
+      target: dind
+    container_name: claude-container-dind
+    hostname: claude-dev-dind
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ${HOME}/.claude:/home/node/.claude:cached
+      - ./:/workspace:delegated
+      - claude-bashhistory:/commandhistory
+      - claude-docker-data:/var/lib/docker
+    environment:
+      - TZ=${TZ:-Europe/Helsinki}
+      - GH_TOKEN=${GH_TOKEN}
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - CLAUDE_CONFIG_DIR=/home/node/.claude
+      - DEVCONTAINER=true
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+  # === DinD variant (mount host Docker socket) ===
+  claude-docker-host:
+    build:
+      context: .devcontainer
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-Europe/Helsinki}
+        CLAUDE_CODE_VERSION: latest
+        VARIANT: dind
+      target: dind
+    container_name: claude-container-docker-host
+    hostname: claude-dev-docker
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ${HOME}/.claude:/home/node/.claude:cached
+      - ./:/workspace:delegated
+      - claude-bashhistory:/commandhistory
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=${TZ:-Europe/Helsinki}
+      - GH_TOKEN=${GH_TOKEN}
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - CLAUDE_CONFIG_DIR=/home/node/.claude
+      - DEVCONTAINER=true
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
 volumes:
   claude-bashhistory:
+  claude-docker-data:
