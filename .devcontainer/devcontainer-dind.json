@@ -40,11 +40,19 @@
     "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
     "source=claude-docker-data-${devcontainerId},target=/var/lib/docker,type=volume"
   ],
+  "forwardPorts": [9222],
+  "portsAttributes": {
+    "9222": {
+      "label": "Playwright CDP",
+      "onAutoForward": "silent"
+    }
+  },
   "containerEnv": {
     "GH_TOKEN": "${localEnv:GH_TOKEN}",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
-    "DOCKER_HOST": "unix:///var/run/docker.sock"
+    "DOCKER_HOST": "unix:///var/run/docker.sock",
+    "PLAYWRIGHT_CHROMIUM_DEBUG_PORT": "${localEnv:PLAYWRIGHT_CHROMIUM_DEBUG_PORT}"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",

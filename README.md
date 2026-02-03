@@ -340,6 +340,79 @@ firewall-reload
 | `SKIP_FIREWALL` | Set to `1` to skip firewall initialization (useful for DinD troubleshooting) |
 | `FIREWALL_CONFIG` | Custom path to allowed-domains.conf (default: workspace or `/usr/local/etc`) |
 | `DOCKER_HOST` | Docker daemon socket (default: `unix:///var/run/docker.sock`) |
+| `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` | Enable Playwright CDP debugging on specified port (e.g., `9222`). Empty = disabled |
+
+## Playwright Remote Debugging
+
+The container supports Playwright remote debugging via Chrome DevTools Protocol (CDP), allowing you to connect an external Chrome browser to debug Playwright tests running inside the container.
+
+### How It Works
+
+The Chromium headless shell only binds to localhost, so the container uses `socat` to forward the debug port:
+- **External port** (0.0.0.0): `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` (e.g., 9222)
+- **Internal port** (127.0.0.1): `PLAYWRIGHT_CDP_INTERNAL_PORT` (automatically set to external + 1, e.g., 9223)
+
+### Quick Start
+
+1. **Start container with debugging enabled:**
+   ```bash
+   docker run -it --rm \
+     --cap-add=NET_ADMIN \
+     --cap-add=NET_RAW \
+     -e SKIP_FIREWALL=1 \
+     -e PLAYWRIGHT_CHROMIUM_DEBUG_PORT=9222 \
+     -p 9222:9222 \
+     claude-container:base
+   ```
+
+2. **Inside the container, launch Playwright with the internal port (external + 1):**
+   ```javascript
+   const { chromium } = require('playwright');
+   const internalPort = parseInt(process.env.PLAYWRIGHT_CHROMIUM_DEBUG_PORT || '9222') + 1;
+   const browser = await chromium.launch({
+     args: [`--remote-debugging-port=${internalPort}`]
+   });
+   ```
+
+3. **Connect from Chrome:**
+   - Open Chrome and navigate to `chrome://inspect`
+   - Click "Configure..." and add `localhost:9222`
+   - Your Playwright browser sessions will appear under "Remote Target"
+
+### Usage Examples
+
+**Quick test script:**
+```bash
+node -e "
+const { chromium } = require('playwright');
+(async () => {
+  const internalPort = parseInt(process.env.PLAYWRIGHT_CHROMIUM_DEBUG_PORT || '9222') + 1;
+  const browser = await chromium.launch({
+    args: ['--remote-debugging-port=' + internalPort]
+  });
+  const page = await browser.newPage();
+  await page.goto('https://example.com');
+  console.log('Browser ready on internal port', internalPort, '- connect via chrome://inspect');
+  await new Promise(() => {});
+})();
+"
+```
+
+**With docker compose:**
+```bash
+PLAYWRIGHT_CHROMIUM_DEBUG_PORT=9222 docker compose up -d claude
+docker compose exec claude bash  # Then run your Playwright script
+```
+
+**With VS Code Dev Container:**
+```bash
+# Set before opening dev container
+export PLAYWRIGHT_CHROMIUM_DEBUG_PORT=9222
+```
+
+### Security Note
+
+Remote debugging exposes browser internals. Only enable when needed and do not expose port 9222 to untrusted networks.
 
 ## Troubleshooting
 

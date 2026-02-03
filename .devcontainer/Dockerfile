@@ -13,11 +13,14 @@ FROM node:${NODE_VERSION}-bookworm as base-common
 ARG TZ=Europe/Helsinki
 ARG CLAUDE_CODE_VERSION=latest
 
+ARG PLAYWRIGHT_CHROMIUM_DEBUG_PORT
+
 ENV TZ=${TZ} \
     DEBIAN_FRONTEND=noninteractive \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     NODE_PATH=/usr/local/lib/node_modules \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
+    PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
 
 # Install base dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -38,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     iputils-ping \
     apt-transport-https \
+    # Port forwarding for Playwright CDP (headless shell only binds to localhost)
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
