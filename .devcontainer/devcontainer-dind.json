@@ -1,15 +1,20 @@
 {
-  "name": "Claude Code Sandbox",
+  "name": "Claude Code Sandbox with Docker",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
       "TZ": "${localEnv:TZ:America/Los_Angeles}",
-      "CLAUDE_CODE_VERSION": "latest"
-    }
+      "CLAUDE_CODE_VERSION": "latest",
+      "VARIANT": "dind"
+    },
+    "target": "dind"
   },
   "runArgs": [
     "--cap-add=NET_ADMIN",
-    "--cap-add=NET_RAW"
+    "--cap-add=NET_RAW",
+    "--cap-add=SYS_ADMIN",
+    "--privileged",
+    "--security-opt=seccomp:unconfined"
   ],
   "customizations": {
     "vscode": {
@@ -32,7 +37,8 @@
   "remoteUser": "node",
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
-    "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
+    "source=claude-docker-data-${devcontainerId},target=/var/lib/docker,type=volume"
   ],
   "forwardPorts": [9222],
   "portsAttributes": {
@@ -45,6 +51,7 @@
     "GH_TOKEN": "${localEnv:GH_TOKEN}",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "DOCKER_HOST": "unix:///var/run/docker.sock",
     "PLAYWRIGHT_CHROMIUM_DEBUG_PORT": "${localEnv:PLAYWRIGHT_CHROMIUM_DEBUG_PORT}"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",

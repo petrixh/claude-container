@@ -1,17 +1,26 @@
 # Claude Code Development Container
 # Based on the official reference implementation with Java 21 support
+# Multi-stage build supporting base and Docker-in-Docker variants
 
 ARG NODE_VERSION=20
-FROM node:${NODE_VERSION}-bookworm
+ARG VARIANT=base
+
+# ========================================
+# BASE-COMMON STAGE (shared dependencies)
+# ========================================
+FROM node:${NODE_VERSION}-bookworm as base-common
 
 ARG TZ=Europe/Helsinki
 ARG CLAUDE_CODE_VERSION=latest
+
+ARG PLAYWRIGHT_CHROMIUM_DEBUG_PORT
 
 ENV TZ=${TZ} \
     DEBIAN_FRONTEND=noninteractive \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     NODE_PATH=/usr/local/lib/node_modules \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
+    PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
 
 # Install base dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     iputils-ping \
     apt-transport-https \
+    # Port forwarding for Playwright CDP (headless shell only binds to localhost)
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -86,6 +97,11 @@ RUN echo '\n# Claude Code aliases' >> /home/node/.zshrc \
     && echo 'HISTSIZE=10000' >> /home/node/.zshrc \
     && echo 'SAVEHIST=10000' >> /home/node/.zshrc
 
+# ========================================
+# BASE STAGE (current container)
+# ========================================
+FROM base-common as base
+
 USER root
 
 # Copy firewall and entrypoint scripts
@@ -102,4 +118,65 @@ USER node
 
 # Set entrypoint and default command
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/bin/zsh"]
+
+# ========================================
+# DIND STAGE (Docker-in-Docker)
+# ========================================
+FROM base-common as dind
+
+USER root
+
+# Install Docker CE
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | \
+       gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" | \
+       tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure Docker daemon
+RUN mkdir -p /etc/docker && cat > /etc/docker/daemon.json <<'EOF'
+{
+  "storage-driver": "overlay2",
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "features": {
+    "buildkit": true
+  }
+}
+EOF
+
+# Add node user to docker group
+RUN usermod -aG docker node
+
+# Create Docker data directory
+RUN mkdir -p /var/lib/docker /var/log && chmod 755 /var/lib/docker
+
+# Copy scripts (including new DinD entrypoint)
+COPY init-firewall.sh /usr/local/bin/init-firewall.sh
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
+COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
+RUN chmod +x /usr/local/bin/init-firewall.sh \
+             /usr/local/bin/entrypoint.sh \
+             /usr/local/bin/entrypoint-dind.sh
+
+WORKDIR /workspace
+USER node
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-dind.sh"]
 CMD ["/bin/zsh"]
