@@ -112,13 +112,81 @@ docker compose up -d claude-docker-host && docker compose exec claude-docker-hos
 docker run -it --rm \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
-  -v "/path/to/claude-container-config:/claude-container-config" \
-  -e CLAUDE_CONFIG_DIR="/claude-container-config" \
+  -v "/path/to/claude-container-config:/home/node/.claude" \
+  -e CLAUDE_CONFIG_DIR="/home/node/.claude" \
   -w /workspace \
-  claude-container
+  claude-container:base
 ```
 
 > **Note:** The `CLAUDE_CONFIG_DIR` environment variable tells Claude where to store authentication credentials. Mount a host directory to persist login across container restarts.
+
+### Option 2b: Docker Run with Environment File
+
+For easier management of environment variables, use a `.env` file:
+
+```bash
+# Copy the example env file and edit with your settings
+cp .env.example .env
+vim .env
+
+# Minimal: just env file
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --env-file .env \
+  claude-container:base
+```
+
+**Add Maven cache** to avoid re-downloading dependencies:
+
+```bash
+mkdir -p ~/.m2-cache
+
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --env-file .env \
+  -v "${HOME}/.m2-cache:/home/node/.m2" \
+  claude-container:base
+```
+
+**Add workspace** to work on a project:
+
+```bash
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --env-file .env \
+  -v "${HOME}/.m2-cache:/home/node/.m2" \
+  -v "$(pwd):/workspace" \
+  claude-container:base
+```
+
+**Full setup** with all common mounts:
+
+```bash
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --env-file .env \
+  -v "${HOME}/.claude:/home/node/.claude" \
+  -v "${HOME}/.m2-cache:/home/node/.m2" \
+  -v "${HOME}/.npm-cache:/home/node/.npm" \
+  -v "${HOME}/.config/gh:/home/node/.config/gh" \
+  -v "$(pwd):/workspace" \
+  -p 9222:9222 \
+  claude-container:base
+```
+
+**Volume mounts explained:**
+
+| Host Path | Container Path | Purpose |
+|-----------|----------------|---------|
+| `~/.claude` | `/home/node/.claude` | Claude authentication and config |
+| `~/.m2-cache` | `/home/node/.m2` | Maven local repository cache |
+| `~/.npm-cache` | `/home/node/.npm` | NPM cache |
+| `~/.config/gh` | `/home/node/.config/gh` | GitHub CLI authentication |
+| `$(pwd)` | `/workspace` | Your project directory |
 
 ### Option 3: Run a One-Off Claude Prompt
 

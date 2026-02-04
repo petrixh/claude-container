@@ -70,10 +70,11 @@ ENV PATH="${JAVA_HOME}/bin:${PATH}"
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-# Install Playwright globally with Chromium headless shell (for arm64/amd64)
+# Install Playwright globally with Chromium browser (full + headless shell)
+# Pre-install browsers so they're included in the image and don't need to be downloaded at runtime
 RUN npm install -g playwright \
     && mkdir -p /opt/playwright-browsers \
-    && npx playwright install --with-deps --only-shell chromium \
+    && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers npx playwright install --with-deps chromium \
     && chmod -R 755 /opt/playwright-browsers
 
 # Configure node user with sudo access
@@ -110,7 +111,8 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
 RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh
 
-# Set working directory
+# Set working directory and ensure node user owns it
+RUN mkdir -p /workspace && chown node:node /workspace
 WORKDIR /workspace
 
 # Switch to node user
@@ -175,6 +177,8 @@ RUN chmod +x /usr/local/bin/init-firewall.sh \
              /usr/local/bin/entrypoint.sh \
              /usr/local/bin/entrypoint-dind.sh
 
+# Set working directory and ensure node user owns it
+RUN mkdir -p /workspace && chown node:node /workspace
 WORKDIR /workspace
 USER node
 
