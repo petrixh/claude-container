@@ -1,0 +1,17 @@
+# Environment files (keep .env.example)
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+*.log
