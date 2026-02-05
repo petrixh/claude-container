@@ -72,9 +72,11 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Install Playwright globally with Chromium browser (full + headless shell)
 # Pre-install browsers so they're included in the image and don't need to be downloaded at runtime
+# Directory must be writable by node user (Java Playwright needs to create lock files)
 RUN npm install -g playwright \
     && mkdir -p /opt/playwright-browsers \
     && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers npx playwright install --with-deps chromium \
+    && chown -R node:node /opt/playwright-browsers \
     && chmod -R 755 /opt/playwright-browsers
 
 # Configure node user with sudo access
