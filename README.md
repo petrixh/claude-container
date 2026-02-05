@@ -408,19 +408,47 @@ firewall-reload
 | `SKIP_FIREWALL` | Set to `1` to skip firewall initialization (useful for DinD troubleshooting) |
 | `FIREWALL_CONFIG` | Custom path to allowed-domains.conf (default: workspace or `/usr/local/etc`) |
 | `DOCKER_HOST` | Docker daemon socket (default: `unix:///var/run/docker.sock`) |
+| `PLAYWRIGHT_BROWSERS_PATH` | Path to pre-installed Playwright browsers (default: `/opt/playwright-browsers`) |
+| `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
 | `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` | Enable Playwright CDP debugging on specified port (e.g., `9222`). Empty = disabled |
 
-## Playwright Remote Debugging
+## Playwright
+
+The container includes Playwright with Chromium pre-installed, ready to use with both Node.js and Java Playwright libraries.
+
+### Pre-installed Browsers
+
+- **Chromium** (full browser + headless shell)
+- **FFmpeg** (for video recording)
+
+Browsers are installed at `/opt/playwright-browsers` and owned by the `node` user (writable for lock files).
+
+### Java Playwright
+
+The container is configured to work with Java Playwright out of the box:
+
+- `PLAYWRIGHT_BROWSERS_PATH` points to pre-installed browsers
+- `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` prevents unnecessary download attempts
+- Required GUI libraries (`libgtk-3`, `libXcursor`) are pre-installed
+
+**Important:** Match your Java Playwright version to the container's Playwright version to use pre-installed browsers:
+
+```bash
+# Check container's Playwright version
+docker run --rm claude-container:base npx playwright --version
+```
+
+### Remote Debugging (CDP)
 
 The container supports Playwright remote debugging via Chrome DevTools Protocol (CDP), allowing you to connect an external Chrome browser to debug Playwright tests running inside the container.
 
-### How It Works
+#### How It Works
 
 The Chromium headless shell only binds to localhost, so the container uses `socat` to forward the debug port:
 - **External port** (0.0.0.0): `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` (e.g., 9222)
 - **Internal port** (127.0.0.1): `PLAYWRIGHT_CDP_INTERNAL_PORT` (automatically set to external + 1, e.g., 9223)
 
-### Quick Start
+#### Quick Start
 
 1. **Start container with debugging enabled:**
    ```bash
@@ -447,7 +475,7 @@ The Chromium headless shell only binds to localhost, so the container uses `soca
    - Click "Configure..." and add `localhost:9222`
    - Your Playwright browser sessions will appear under "Remote Target"
 
-### Usage Examples
+#### Usage Examples
 
 **Quick test script:**
 ```bash
@@ -478,7 +506,7 @@ docker compose exec claude bash  # Then run your Playwright script
 export PLAYWRIGHT_CHROMIUM_DEBUG_PORT=9222
 ```
 
-### Security Note
+#### Security Note
 
 Remote debugging exposes browser internals. Only enable when needed and do not expose port 9222 to untrusted networks.
 

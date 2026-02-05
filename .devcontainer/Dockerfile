@@ -20,6 +20,7 @@ ENV TZ=${TZ} \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     NODE_PATH=/usr/local/lib/node_modules \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
 
 # Install base dependencies
@@ -43,6 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-transport-https \
     # Port forwarding for Playwright CDP (headless shell only binds to localhost)
     socat \
+    # Playwright browser dependencies (for Java Playwright)
+    libxcursor1 \
+    libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -72,10 +76,14 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Install Playwright globally with Chromium browser (full + headless shell)
 # Pre-install browsers so they're included in the image and don't need to be downloaded at runtime
-# Directory must be writable by node user (Java Playwright needs to create lock files)
 RUN npm install -g playwright \
     && mkdir -p /opt/playwright-browsers \
-    && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers npx playwright install --with-deps chromium \
+    && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers npx playwright install --with-deps chromium
+
+# Make npm global directories and Playwright browsers writable by node user
+# This allows Claude to self-update and Java Playwright to create lock files
+RUN chown -R node:node /usr/local/lib/node_modules \
+    && chown -R node:node /usr/local/bin \
     && chown -R node:node /opt/playwright-browsers \
     && chmod -R 755 /opt/playwright-browsers
 
