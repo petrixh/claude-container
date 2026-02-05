@@ -13,7 +13,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,6 +53,56 @@ jobs:
             type=sha,prefix=
             type=ref,event=pr
 
+      # Build for local testing first (single platform)
+      - name: Build for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .devcontainer
+          file: .devcontainer/Dockerfile
+          target: ${{ matrix.variant }}
+          platforms: linux/amd64
+          load: true
+          tags: claude-container:${{ matrix.variant }}-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Test Playwright in base variant
+      - name: Test Playwright installation
+        if: matrix.variant == 'base'
+        run: |
+          echo "=== Testing Playwright browsers ==="
+          docker run --rm --entrypoint /bin/bash claude-container:base-test -c "
+            echo 'Checking browser directory ownership...'
+            ls -la /opt/playwright-browsers/
+
+            echo ''
+            echo 'Testing lock file creation...'
+            touch /opt/playwright-browsers/__dirlock
+            rm /opt/playwright-browsers/__dirlock
+            echo 'Lock file test passed'
+
+            echo ''
+            echo 'Testing Playwright browser launch...'
+            node -e \"
+              const { chromium } = require('playwright');
+              (async () => {
+                console.log('Launching browser...');
+                const browser = await chromium.launch();
+                console.log('Browser launched successfully');
+                const page = await browser.newPage();
+                await page.goto('https://example.com');
+                const title = await page.title();
+                console.log('Page title:', title);
+                if (!title.includes('Example')) {
+                  throw new Error('Unexpected page title');
+                }
+                await browser.close();
+                console.log('Playwright test passed!');
+              })();
+            \"
+          "
+
+      # Build and push multi-platform images
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
