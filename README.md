@@ -418,10 +418,48 @@ The container includes Playwright with Chromium pre-installed, ready to use with
 
 ### Pre-installed Browsers
 
-- **Chromium** (full browser + headless shell)
+The container includes **two versions** of Chromium to support different use cases:
+
+- **Standard Playwright Chromium** (e.g., `chromium-1208`) - For Java Playwright and direct Node.js Playwright usage
+- **MCP Playwright Chromium** (e.g., `chromium-1209`) - For Claude's browser automation tools (`@playwright/mcp`)
 - **FFmpeg** (for video recording)
 
+This dual installation ensures that Claude's MCP browser tools work without downloading browsers at runtime.
+
 Browsers are installed at `/opt/playwright-browsers` and owned by the `node` user (writable for lock files).
+
+### MCP Configuration (.mcp.json)
+
+To use the pre-installed MCP browsers (avoiding downloads at runtime), pin the `@playwright/mcp` version in your `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@0.0.64",
+        "--headless",
+        "--browser",
+        "chromium"
+      ]
+    }
+  }
+}
+```
+
+**Key options:**
+- `@playwright/mcp@X.X.X` - Pin to the installed version (check with `playwright-info`)
+- `--headless` - Run without visible browser UI (recommended for containers)
+- `--browser chromium` - Explicitly use Chromium
+
+**Check the installed MCP version:**
+```bash
+playwright-info
+# Shows: MCP Package: @playwright/mcp@0.0.64
+```
+
+Using `@latest` instead of a pinned version will download new browsers at runtime, which may be slow or fail if the firewall blocks downloads.
 
 ### Java Playwright
 
@@ -431,11 +469,34 @@ The container is configured to work with Java Playwright out of the box:
 - `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` prevents unnecessary download attempts
 - Required GUI libraries (`libgtk-3`, `libXcursor`) are pre-installed
 
-**Important:** Match your Java Playwright version to the container's Playwright version to use pre-installed browsers:
+**Important:** Match your Java Playwright version to the container's Playwright version to use pre-installed browsers.
 
+**Check compatibility info:**
 ```bash
-# Check container's Playwright version
-docker run --rm claude-container:base npx playwright --version
+# Inside the container, run:
+playwright-info
+
+# Or check the VERSION file directly:
+cat /opt/playwright-browsers/VERSION
+```
+
+Example output:
+```
+Standard Playwright: 1.58.1
+  Chromium:          chromium-1208
+
+MCP Package:         @playwright/mcp@0.0.64
+  Playwright:        1.59.0-alpha
+  Chromium:          chromium-1209
+```
+
+Use this version in your Maven `pom.xml`:
+```xml
+<dependency>
+    <groupId>com.microsoft.playwright</groupId>
+    <artifactId>playwright</artifactId>
+    <version>1.58.1</version>  <!-- Match PLAYWRIGHT_VERSION -->
+</dependency>
 ```
 
 ### Remote Debugging (CDP)
