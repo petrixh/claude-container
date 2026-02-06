@@ -431,11 +431,30 @@ The container is configured to work with Java Playwright out of the box:
 - `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` prevents unnecessary download attempts
 - Required GUI libraries (`libgtk-3`, `libXcursor`) are pre-installed
 
-**Important:** Match your Java Playwright version to the container's Playwright version to use pre-installed browsers:
+**Important:** Match your Java Playwright version to the container's Playwright version to use pre-installed browsers.
 
+**Check compatibility info:**
 ```bash
-# Check container's Playwright version
-docker run --rm claude-container:base npx playwright --version
+# Inside the container, run:
+playwright-info
+
+# Or check the VERSION file directly:
+cat /opt/playwright-browsers/VERSION
+```
+
+Example output:
+```
+PLAYWRIGHT_VERSION=1.58.1
+CHROMIUM_BUILD=chromium-1208
+```
+
+Use this version in your Maven `pom.xml`:
+```xml
+<dependency>
+    <groupId>com.microsoft.playwright</groupId>
+    <artifactId>playwright</artifactId>
+    <version>1.58.1</version>  <!-- Match PLAYWRIGHT_VERSION -->
+</dependency>
 ```
 
 ### Remote Debugging (CDP)

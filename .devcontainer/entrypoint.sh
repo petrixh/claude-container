@@ -4,6 +4,34 @@
 
 set -e
 
+# Display welcome message with version info
+echo "========================================"
+echo "  Claude Code Container"
+echo "========================================"
+
+# Show Claude version
+if command -v claude &> /dev/null; then
+    CLAUDE_VER=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+    echo "  Claude Code:  ${CLAUDE_VER}"
+fi
+
+# Show Playwright version from VERSION file
+if [[ -f /opt/playwright-browsers/VERSION ]]; then
+    PW_VER=$(grep "^PLAYWRIGHT_VERSION=" /opt/playwright-browsers/VERSION | cut -d= -f2)
+    CHROMIUM_BUILD=$(grep "^CHROMIUM_BUILD=" /opt/playwright-browsers/VERSION | cut -d= -f2)
+    echo "  Playwright:   ${PW_VER} (${CHROMIUM_BUILD})"
+    echo "  Browsers:     ${PLAYWRIGHT_BROWSERS_PATH:-/opt/playwright-browsers}"
+fi
+
+# Show Java version
+if command -v java &> /dev/null; then
+    JAVA_VER=$(java -version 2>&1 | head -1 | cut -d'"' -f2)
+    echo "  Java:         ${JAVA_VER}"
+fi
+
+echo "========================================"
+echo ""
+
 # Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)
 # This requires NET_ADMIN capability to be set
 if [[ "${SKIP_FIREWALL:-0}" == "1" ]]; then
