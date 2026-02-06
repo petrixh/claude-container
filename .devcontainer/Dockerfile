@@ -13,15 +13,12 @@ FROM node:${NODE_VERSION}-bookworm as base-common
 ARG TZ=Europe/Helsinki
 ARG CLAUDE_CODE_VERSION=latest
 
-ARG PLAYWRIGHT_CHROMIUM_DEBUG_PORT
-
 ENV TZ=${TZ} \
     DEBIAN_FRONTEND=noninteractive \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     NODE_PATH=/usr/local/lib/node_modules \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Install base dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     openssh-client \
     sudo \
+    nano \
     vim \
     wget \
     zsh \
@@ -42,6 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     iputils-ping \
     apt-transport-https \
+    # Process tools (ps aux needed by CDP proxy monitor)
+    procps \
     # Port forwarding for Playwright CDP (headless shell only binds to localhost)
     socat \
     # Playwright browser dependencies (for Java Playwright)
@@ -151,8 +151,9 @@ USER root
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY playwright-info.sh /usr/local/bin/playwright-info
+COPY cdp-proxy-monitor.sh /usr/local/bin/cdp-proxy-monitor
 COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/playwright-info
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/playwright-info /usr/local/bin/cdp-proxy-monitor
 
 # Set working directory and ensure node user owns it
 RUN mkdir -p /workspace && chown node:node /workspace
@@ -216,11 +217,13 @@ COPY init-firewall.sh /usr/local/bin/init-firewall.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
 COPY playwright-info.sh /usr/local/bin/playwright-info
+COPY cdp-proxy-monitor.sh /usr/local/bin/cdp-proxy-monitor
 COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
 RUN chmod +x /usr/local/bin/init-firewall.sh \
              /usr/local/bin/entrypoint.sh \
              /usr/local/bin/entrypoint-dind.sh \
-             /usr/local/bin/playwright-info
+             /usr/local/bin/playwright-info \
+             /usr/local/bin/cdp-proxy-monitor
 
 # Set working directory and ensure node user owns it
 RUN mkdir -p /workspace && chown node:node /workspace
