@@ -19,7 +19,13 @@ fi
 if [[ -f /opt/playwright-browsers/VERSION ]]; then
     PW_VER=$(grep "^PLAYWRIGHT_VERSION=" /opt/playwright-browsers/VERSION | cut -d= -f2)
     CHROMIUM_BUILD=$(grep "^CHROMIUM_BUILD=" /opt/playwright-browsers/VERSION | cut -d= -f2)
+    MCP_PKG_VER=$(grep "^MCP_PACKAGE_VERSION=" /opt/playwright-browsers/VERSION | cut -d= -f2)
+    MCP_PW_VER=$(grep "^MCP_PLAYWRIGHT_VERSION=" /opt/playwright-browsers/VERSION | cut -d= -f2)
+    MCP_CHROMIUM_BUILD=$(grep "^MCP_CHROMIUM_BUILD=" /opt/playwright-browsers/VERSION | cut -d= -f2)
     echo "  Playwright:   ${PW_VER} (${CHROMIUM_BUILD})"
+    if [[ -n "${MCP_PW_VER}" ]]; then
+        echo "  MCP:          @playwright/mcp@${MCP_PKG_VER} (${MCP_CHROMIUM_BUILD})"
+    fi
     echo "  Browsers:     ${PLAYWRIGHT_BROWSERS_PATH:-/opt/playwright-browsers}"
 fi
 
@@ -30,6 +36,24 @@ if command -v java &> /dev/null; then
 fi
 
 echo "========================================"
+
+# Show MCP configuration hint if MCP is installed
+if [[ -f /opt/playwright-browsers/VERSION ]]; then
+    MCP_PKG_VER=$(grep "^MCP_PACKAGE_VERSION=" /opt/playwright-browsers/VERSION | cut -d= -f2)
+    if [[ -n "${MCP_PKG_VER}" ]]; then
+        echo ""
+        echo "Playwright MCP .mcp.json (use pre-installed browsers):"
+        echo '  "playwright": {'
+        echo '    "command": "npx",'
+        echo '    "args": ['
+        echo "      \"@playwright/mcp@${MCP_PKG_VER}\","
+        echo '      "--headless",'
+        echo '      "--browser",'
+        echo '      "chromium"'
+        echo '    ]'
+        echo '  }'
+    fi
+fi
 echo ""
 
 # Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)

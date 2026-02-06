@@ -418,10 +418,48 @@ The container includes Playwright with Chromium pre-installed, ready to use with
 
 ### Pre-installed Browsers
 
-- **Chromium** (full browser + headless shell)
+The container includes **two versions** of Chromium to support different use cases:
+
+- **Standard Playwright Chromium** (e.g., `chromium-1208`) - For Java Playwright and direct Node.js Playwright usage
+- **MCP Playwright Chromium** (e.g., `chromium-1209`) - For Claude's browser automation tools (`@playwright/mcp`)
 - **FFmpeg** (for video recording)
 
+This dual installation ensures that Claude's MCP browser tools work without downloading browsers at runtime.
+
 Browsers are installed at `/opt/playwright-browsers` and owned by the `node` user (writable for lock files).
+
+### MCP Configuration (.mcp.json)
+
+To use the pre-installed MCP browsers (avoiding downloads at runtime), pin the `@playwright/mcp` version in your `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@0.0.64",
+        "--headless",
+        "--browser",
+        "chromium"
+      ]
+    }
+  }
+}
+```
+
+**Key options:**
+- `@playwright/mcp@X.X.X` - Pin to the installed version (check with `playwright-info`)
+- `--headless` - Run without visible browser UI (recommended for containers)
+- `--browser chromium` - Explicitly use Chromium
+
+**Check the installed MCP version:**
+```bash
+playwright-info
+# Shows: MCP Package: @playwright/mcp@0.0.64
+```
+
+Using `@latest` instead of a pinned version will download new browsers at runtime, which may be slow or fail if the firewall blocks downloads.
 
 ### Java Playwright
 
@@ -444,8 +482,12 @@ cat /opt/playwright-browsers/VERSION
 
 Example output:
 ```
-PLAYWRIGHT_VERSION=1.58.1
-CHROMIUM_BUILD=chromium-1208
+Standard Playwright: 1.58.1
+  Chromium:          chromium-1208
+
+MCP Package:         @playwright/mcp@0.0.64
+  Playwright:        1.59.0-alpha
+  Chromium:          chromium-1209
 ```
 
 Use this version in your Maven `pom.xml`:

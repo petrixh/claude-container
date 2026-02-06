@@ -93,6 +93,24 @@ RUN npm install -g playwright \
     && echo "#   <artifactId>playwright</artifactId>" >> /opt/playwright-browsers/VERSION \
     && echo "#   <version>${PLAYWRIGHT_VERSION}</version>" >> /opt/playwright-browsers/VERSION
 
+# Install Playwright MCP and its required browsers (newer version than standard Playwright)
+# This ensures Claude's MCP tools work without downloading browsers at runtime
+# The MCP typically requires a newer Playwright version with a different chromium build
+RUN npm install -g @playwright/mcp \
+    && MCP_PACKAGE_VERSION=$(npm list -g @playwright/mcp --json 2>/dev/null | jq -r '.dependencies["@playwright/mcp"].version // empty') \
+    && MCP_PW_VERSION=$(npm view @playwright/mcp dependencies.playwright 2>/dev/null || echo "") \
+    && if [ -n "$MCP_PW_VERSION" ]; then \
+         echo "Installing MCP Playwright browsers (version ${MCP_PW_VERSION})..." \
+         && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers npx playwright@${MCP_PW_VERSION} install --with-deps chromium \
+         && echo "" >> /opt/playwright-browsers/VERSION \
+         && echo "# MCP Playwright (for Claude's browser tools):" >> /opt/playwright-browsers/VERSION \
+         && echo "MCP_PACKAGE_VERSION=${MCP_PACKAGE_VERSION}" >> /opt/playwright-browsers/VERSION \
+         && echo "MCP_PLAYWRIGHT_VERSION=${MCP_PW_VERSION}" >> /opt/playwright-browsers/VERSION \
+         && echo "MCP_CHROMIUM_BUILD=$(ls -d /opt/playwright-browsers/chromium-* | tail -1 | xargs basename)" >> /opt/playwright-browsers/VERSION; \
+       else \
+         echo "Warning: Could not determine MCP Playwright version, skipping MCP browser install"; \
+       fi
+
 # Make npm global directories and Playwright browsers writable by node user
 # This allows Claude to self-update and Java Playwright to create lock files
 RUN chown -R node:node /usr/local/lib/node_modules \
