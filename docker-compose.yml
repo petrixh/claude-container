@@ -28,6 +28,7 @@ services:
       - DEVCONTAINER=true
       - PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
+      - NOTIFICATION_URL=${NOTIFICATION_URL:-}
     ports:
       - "${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-9222}:9222"
     working_dir: /workspace
@@ -69,6 +70,7 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
+      - NOTIFICATION_URL=${NOTIFICATION_URL:-}
     ports:
       - "${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-9222}:9222"
     working_dir: /workspace
@@ -106,6 +108,7 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
+      - NOTIFICATION_URL=${NOTIFICATION_URL:-}
     ports:
       - "${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-9222}:9222"
     working_dir: /workspace

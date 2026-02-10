@@ -73,6 +73,53 @@ if [[ -n "${VAADIN_PRO_KEY:-}" ]]; then
     echo "Vaadin Pro key configured (~/.vaadin/proKey)"
 fi
 
+# Configure Claude Code notification hooks if NOTIFICATION_URL is provided
+if [[ -n "${NOTIFICATION_URL:-}" ]]; then
+    CLAUDE_SETTINGS="${CLAUDE_CONFIG_DIR:-/home/node/.claude}/settings.json"
+    mkdir -p "$(dirname "${CLAUDE_SETTINGS}")"
+
+    # Build the hooks JSON
+    # Enabled: idle_prompt (Claude waiting for input), permission_prompt (needs permission)
+    # Additional matchers available: elicitation_dialog, auth_success
+    # Additional hook events: Stop (every response), TaskCompleted
+    HOOKS_JSON=$(cat <<HOOKEOF
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -d \"Claude is idle - waiting for input\" ${NOTIFICATION_URL}"
+          }
+        ]
+      },
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -d \"Claude needs permission to proceed\" ${NOTIFICATION_URL}"
+          }
+        ]
+      }
+    ]
+  }
+}
+HOOKEOF
+    )
+
+    # Merge hooks into existing settings.json (or create new one)
+    if [[ -f "${CLAUDE_SETTINGS}" ]]; then
+        MERGED=$(jq -s '.[0] * .[1]' "${CLAUDE_SETTINGS}" <(echo "${HOOKS_JSON}"))
+        echo "${MERGED}" > "${CLAUDE_SETTINGS}"
+    else
+        echo "${HOOKS_JSON}" > "${CLAUDE_SETTINGS}"
+    fi
+    echo "Notification hooks configured for: ${NOTIFICATION_URL}"
+fi
+
 # Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)
 # This requires NET_ADMIN capability to be set
 if [[ "${SKIP_FIREWALL:-0}" == "1" ]]; then

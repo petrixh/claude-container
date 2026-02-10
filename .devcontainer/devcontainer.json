@@ -50,7 +50,8 @@
     "PLAYWRIGHT_CHROMIUM_DEBUG_PORT": "${localEnv:PLAYWRIGHT_CHROMIUM_DEBUG_PORT}",
     "PLAYWRIGHT_BROWSERS_PATH": "/opt/playwright-browsers",
     "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
-    "VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}"
+    "VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}",
+    "NOTIFICATION_URL": "${localEnv:NOTIFICATION_URL}"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",

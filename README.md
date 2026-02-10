@@ -413,7 +413,45 @@ firewall-reload
 | `PLAYWRIGHT_BROWSERS_PATH` | Path to pre-installed Playwright browsers (default: `/opt/playwright-browsers`) |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
 | `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` | Enable Playwright CDP debugging on specified port (e.g., `9222`). Empty = disabled |
+| `NOTIFICATION_URL` | URL to POST notifications to when Claude is idle or needs permission (e.g., `https://ntfy.sh/your-topic`) |
 | `VAADIN_PRO_KEY` | Vaadin Pro/Commercial subscription key for commercial components (Charts, Board, etc.) and Acceleration Kits |
+
+## Notifications
+
+The container can notify you when Claude needs attention via any URL that accepts POST requests (e.g., [ntfy.sh](https://ntfy.sh), Slack webhooks, custom endpoints).
+
+### Setup
+
+Set the `NOTIFICATION_URL` environment variable:
+```bash
+# In .env file
+NOTIFICATION_URL=https://ntfy.sh/your-topic-here
+
+# Or via docker run
+docker run -it --rm \
+  -e NOTIFICATION_URL=https://ntfy.sh/your-topic-here \
+  claude-container:base
+```
+
+The entrypoint automatically configures Claude Code hooks in `settings.json` for these events:
+
+| Event | Message |
+|-------|---------|
+| `idle_prompt` | Claude finished and is waiting for your input (60+ seconds idle) |
+| `permission_prompt` | Claude needs your permission to proceed |
+
+### Additional Hook Events
+
+You can manually add more hooks to `~/.claude/settings.json` for these events:
+
+| Matcher / Event | Description |
+|-----------------|-------------|
+| `elicitation_dialog` | Claude is asking a question or showing a dialog |
+| `auth_success` | Authentication completed |
+| `Stop` (event, not matcher) | Claude finished responding (fires every time) |
+| `TaskCompleted` (event) | A task was marked as completed |
+
+See the [Claude Code hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) for the full reference.
 
 ## Vaadin Commercial Components
 
