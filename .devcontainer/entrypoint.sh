@@ -103,6 +103,15 @@ if [[ -n "${NOTIFICATION_URL:-}" ]]; then
             "command": "curl -sf -d \"Claude needs permission to proceed\" ${NOTIFICATION_URL}"
           }
         ]
+      },
+      {
+        "matcher": "elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -d \"Claude is waiting for your answer\" ${NOTIFICATION_URL}"
+          }
+        ]
       }
     ]
   }

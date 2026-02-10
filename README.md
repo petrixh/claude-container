@@ -439,6 +439,7 @@ The entrypoint automatically configures Claude Code hooks in `settings.json` for
 |-------|---------|
 | `idle_prompt` | Claude finished and is waiting for your input (60+ seconds idle) |
 | `permission_prompt` | Claude needs your permission to proceed |
+| `elicitation_dialog` | Claude is asking a question and waiting for your answer |
 
 ### Additional Hook Events
 
@@ -446,7 +447,6 @@ You can manually add more hooks to `~/.claude/settings.json` for these events:
 
 | Matcher / Event | Description |
 |-----------------|-------------|
-| `elicitation_dialog` | Claude is asking a question or showing a dialog |
 | `auth_success` | Authentication completed |
 | `Stop` (event, not matcher) | Claude finished responding (fires every time) |
 | `TaskCompleted` (event) | A task was marked as completed |
