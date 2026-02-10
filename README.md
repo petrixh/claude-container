@@ -28,20 +28,21 @@ This repository provides three container variants:
 
 | Variant | Size | Docker | Best For | Limitations |
 |---------|------|--------|----------|-------------|
-| **`claude`** (base) | 3.47GB | ❌ No | General Claude Code development | No Docker support |
-| **`claude-docker-host`** ⭐ | 3.92GB | ✅ Via host | Docker development, testing | Requires host Docker |
+| **`claude`** (base) ⭐ | 3.47GB | ❌ No | General Claude Code development | No Docker support |
+| **`claude-docker-host`** | 3.92GB | ✅ Via host | Docker development, testing | Requires host Docker |
 | **`claude-dind`** | 3.92GB | ✅ Isolated | Secure isolation, CI/CD | Firewall blocks Docker Hub |
 
 ### Quick Decision Guide
 
-**Choose `claude` (base) if:**
+**Choose `claude` (base) if:** ⭐ RECOMMENDED
+- General development (Java, Node.js, etc.)
 - You don't need Docker inside the container
 - You want the smallest, fastest container
 
-**Choose `claude-docker-host` if:** ⭐ RECOMMENDED for Docker work
+**Choose `claude-docker-host` if:**
 - You need Docker and have Docker on your host
 - You want to pull from Docker Hub
-- You want lower resource usage
+- You want lower resource usage than DinD
 
 **Choose `claude-dind` if:**
 - You need complete isolation from host Docker
@@ -52,14 +53,14 @@ This repository provides three container variants:
 
 ### Most Common Use Cases
 
-**Standard Claude Code Development (no Docker):**
+**Standard Development (recommended):**
 ```bash
 docker compose up -d claude
 docker compose exec claude zsh
 claude --version
 ```
 
-**Docker Development (recommended):**
+**Docker Development (host socket):**
 ```bash
 docker compose up -d claude-docker-host
 docker compose exec claude-docker-host zsh
@@ -229,15 +230,14 @@ mv .devcontainer/devcontainer-dind.json .devcontainer/devcontainer.json
 
 ### When to Use Each Variant
 
-**Base Variant (`claude`)** - Recommended for most users
+**Base Variant (`claude`)** ⭐ Recommended
 - ✅ Standard Claude Code development
-- ✅ No Docker needed
-- ✅ Smaller image size (3.47GB)
-- ✅ Faster startup (~2 seconds)
-- ✅ Lower resource usage
-- Use when: You don't need Docker inside the container
+- ✅ Smallest image size (3.47GB)
+- ✅ Fastest startup (~2 seconds)
+- ✅ Lowest resource usage
+- Use when: General development without Docker needs (most users)
 
-**Host Socket Variant (`claude-docker-host`)** - Recommended for Docker development
+**Host Socket Variant (`claude-docker-host`)** - For Docker development
 - ✅ Access to Docker without firewall issues
 - ✅ Shares host Docker daemon and images
 - ✅ Lower resource usage than separate daemon
@@ -411,6 +411,56 @@ firewall-reload
 | `PLAYWRIGHT_BROWSERS_PATH` | Path to pre-installed Playwright browsers (default: `/opt/playwright-browsers`) |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
 | `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` | Enable Playwright CDP debugging on specified port (e.g., `9222`). Empty = disabled |
+| `VAADIN_PRO_KEY` | Vaadin Pro/Commercial subscription key for commercial components (Charts, Board, etc.) and Acceleration Kits |
+
+## Vaadin Commercial Components
+
+The container supports [Vaadin commercial components](https://vaadin.com/components) (Charts, Board, Grid Pro, etc.) and Acceleration Kits via the `VAADIN_PRO_KEY` environment variable.
+
+### Providing the Pro Key
+
+There are two ways to provide your Vaadin Pro subscription key:
+
+**Option 1: Environment variable (recommended for containers)**
+
+Set `VAADIN_PRO_KEY` in your `.env` file or pass it directly:
+```bash
+# In .env file
+VAADIN_PRO_KEY=your-pro-key-here
+
+# Or via docker run
+docker run -it --rm \
+  -e VAADIN_PRO_KEY=your-pro-key-here \
+  claude-container:base
+```
+
+When the container starts, the entrypoint automatically writes the key to `~/.vaadin/proKey` so both the environment variable and file-based mechanisms work.
+
+**Option 2: Mount a proKey file**
+
+If you already have a `~/.vaadin/proKey` file on your host, mount it into the container:
+```bash
+docker run -it --rm \
+  -v "${HOME}/.vaadin:/home/node/.vaadin:ro" \
+  claude-container:base
+```
+
+### Firewall Domains
+
+If you're using Vaadin commercial components with the firewall enabled, uncomment the Vaadin domains in `allowed-domains.conf`:
+```
+maven.vaadin.com
+tools.vaadin.com
+vaadin.com
+cdn.vaadin.com
+```
+
+Or add them at runtime:
+```bash
+# Inside the container
+echo -e "maven.vaadin.com\ntools.vaadin.com\nvaadin.com\ncdn.vaadin.com" | sudo tee -a /usr/local/etc/allowed-domains.conf
+firewall-reload
+```
 
 ## Playwright
 
