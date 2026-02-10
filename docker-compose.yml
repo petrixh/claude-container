@@ -21,6 +21,8 @@ services:
     environment:
       - TZ=${TZ:-Europe/Helsinki}
       - GH_TOKEN=${GH_TOKEN}
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
       - NODE_OPTIONS=--max-old-space-size=4096
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       - DEVCONTAINER=true
@@ -59,6 +61,8 @@ services:
     environment:
       - TZ=${TZ:-Europe/Helsinki}
       - GH_TOKEN=${GH_TOKEN}
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
       - NODE_OPTIONS=--max-old-space-size=4096
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       - DEVCONTAINER=true
@@ -94,6 +98,8 @@ services:
     environment:
       - TZ=${TZ:-Europe/Helsinki}
       - GH_TOKEN=${GH_TOKEN}
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
       - NODE_OPTIONS=--max-old-space-size=4096
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       - DEVCONTAINER=true

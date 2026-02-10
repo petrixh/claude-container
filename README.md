@@ -403,6 +403,8 @@ firewall-reload
 |----------|-------------|
 | `CLAUDE_CONFIG_DIR` | Directory for Claude authentication and config (mount from host for persistence) |
 | `GH_TOKEN` | GitHub Personal Access Token for `gh` CLI authentication |
+| `GIT_USER_NAME` | Git author/committer name (sets `git config --global user.name`) |
+| `GIT_USER_EMAIL` | Git author/committer email (sets `git config --global user.email`) |
 | `TZ` | Timezone (default: `Europe/Helsinki`). Pass `-e TZ=$TZ` to inherit from host |
 | `CLAUDE_CODE_VERSION` | Claude Code version to install (default: `latest`) |
 | `SKIP_FIREWALL` | Set to `1` to skip firewall initialization (useful for DinD troubleshooting) |

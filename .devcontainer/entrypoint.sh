@@ -56,6 +56,16 @@ if [[ -f /opt/playwright-browsers/VERSION ]]; then
 fi
 echo ""
 
+# Configure git identity if env vars are provided
+if [[ -n "${GIT_USER_NAME:-}" ]]; then
+    git config --global user.name "${GIT_USER_NAME}"
+    echo "Git user.name configured: ${GIT_USER_NAME}"
+fi
+if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
+    git config --global user.email "${GIT_USER_EMAIL}"
+    echo "Git user.email configured: ${GIT_USER_EMAIL}"
+fi
+
 # Set up Vaadin Pro Key file if env var is provided
 if [[ -n "${VAADIN_PRO_KEY:-}" ]]; then
     mkdir -p /home/node/.vaadin
