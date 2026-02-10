@@ -66,13 +66,6 @@ if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
     echo "Git user.email configured: ${GIT_USER_EMAIL}"
 fi
 
-# Set up Vaadin Pro Key file if env var is provided
-if [[ -n "${VAADIN_PRO_KEY:-}" ]]; then
-    mkdir -p /home/node/.vaadin
-    echo "${VAADIN_PRO_KEY}" > /home/node/.vaadin/proKey
-    echo "Vaadin Pro key configured (~/.vaadin/proKey)"
-fi
-
 # Configure Claude Code notification hooks if NOTIFICATION_URL is provided
 if [[ -n "${NOTIFICATION_URL:-}" ]]; then
     CLAUDE_SETTINGS="${CLAUDE_CONFIG_DIR:-/home/node/.claude}/settings.json"

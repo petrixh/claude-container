@@ -474,11 +474,9 @@ docker run -it --rm \
   claude-container:base
 ```
 
-When the container starts, the entrypoint automatically writes the key to `~/.vaadin/proKey` so both the environment variable and file-based mechanisms work.
-
 **Option 2: Mount a proKey file**
 
-If you already have a `~/.vaadin/proKey` file on your host, mount it into the container:
+If you prefer file-based configuration, mount your `~/.vaadin/proKey` file from the host:
 ```bash
 docker run -it --rm \
   -v "${HOME}/.vaadin:/home/node/.vaadin:ro" \
