@@ -26,11 +26,10 @@ services:
       - NODE_OPTIONS=--max-old-space-size=4096
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       - DEVCONTAINER=true
-      - PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
       - NOTIFICATION_URL=${NOTIFICATION_URL:-}
     ports:
-      - "${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-9222}:9222"
+      - "9222:9222"
     working_dir: /workspace
     stdin_open: true
     tty: true
@@ -68,11 +67,10 @@ services:
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       - DEVCONTAINER=true
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
       - NOTIFICATION_URL=${NOTIFICATION_URL:-}
     ports:
-      - "${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-9222}:9222"
+      - "9222:9222"
     working_dir: /workspace
     stdin_open: true
     tty: true
@@ -106,11 +104,10 @@ services:
       - CLAUDE_CONFIG_DIR=/home/node/.claude
       - DEVCONTAINER=true
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - PLAYWRIGHT_CHROMIUM_DEBUG_PORT=${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-}
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
       - NOTIFICATION_URL=${NOTIFICATION_URL:-}
     ports:
-      - "${PLAYWRIGHT_CHROMIUM_DEBUG_PORT:-9222}:9222"
+      - "9222:9222"
     working_dir: /workspace
     stdin_open: true
     tty: true

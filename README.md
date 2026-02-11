@@ -412,7 +412,6 @@ firewall-reload
 | `DOCKER_HOST` | Docker daemon socket (default: `unix:///var/run/docker.sock`) |
 | `PLAYWRIGHT_BROWSERS_PATH` | Path to pre-installed Playwright browsers (default: `/opt/playwright-browsers`) |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
-| `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` | Enable Playwright CDP debugging on specified port (e.g., `9222`). Empty = disabled |
 | `NOTIFICATION_URL` | URL to POST notifications to when Claude is idle or needs permission (e.g., `https://ntfy.sh/your-topic`) |
 | `VAADIN_PRO_KEY` | Vaadin Pro/Commercial subscription key for commercial components (Charts, Board, etc.) and Acceleration Kits |
 
@@ -589,70 +588,55 @@ Use this version in your Maven `pom.xml`:
 
 ### Remote Debugging (CDP)
 
-The container supports Playwright remote debugging via Chrome DevTools Protocol (CDP), allowing you to connect an external Chrome browser to debug Playwright tests running inside the container.
+The container includes `cdp-proxy-monitor`, a background script that lets you connect Chrome DevTools to Playwright browsers running inside the container.
+
+#### The Problem
+
+Playwright MCP launches Chrome with a random `--remote-debugging-port` each time. The container exposes port 9222 for external Chrome DevTools connections, but there's no way to force Playwright MCP to use a fixed port.
 
 #### How It Works
 
-The Chromium headless shell only binds to localhost, so the container uses `socat` to forward the debug port:
-- **External port** (0.0.0.0): `PLAYWRIGHT_CHROMIUM_DEBUG_PORT` (e.g., 9222)
-- **Internal port** (127.0.0.1): `PLAYWRIGHT_CDP_INTERNAL_PORT` (automatically set to external + 1, e.g., 9223)
+`cdp-proxy-monitor` runs in the background and:
+1. Polls every second for a running Chrome process with `--remote-debugging-port`
+2. Extracts the actual port Chrome is listening on
+3. Sets up a socat proxy: `0.0.0.0:9222 -> 127.0.0.1:<chrome-port>`
+4. Detects when Chrome dies and waits for a new instance
+5. Auto-reconnects when Chrome restarts on a different port
+
+| Event | Monitor action |
+|-------|---------------|
+| Chrome not running | Idles, checks every 1s |
+| Chrome starts (port N) | Starts proxy: `9222 -> N`, verifies |
+| Chrome still on port N | No action |
+| Chrome dies | Kills proxy, waits |
+| Chrome restarts (port M) | Re-proxies: `9222 -> M`, verifies |
 
 #### Quick Start
 
-1. **Start container with debugging enabled:**
+1. **Start the container with port 9222 exposed:**
    ```bash
    docker run -it --rm \
      --cap-add=NET_ADMIN \
      --cap-add=NET_RAW \
      -e SKIP_FIREWALL=1 \
-     -e PLAYWRIGHT_CHROMIUM_DEBUG_PORT=9222 \
      -p 9222:9222 \
      claude-container:base
    ```
 
-2. **Inside the container, launch Playwright with the internal port (external + 1):**
-   ```javascript
-   const { chromium } = require('playwright');
-   const internalPort = parseInt(process.env.PLAYWRIGHT_CHROMIUM_DEBUG_PORT || '9222') + 1;
-   const browser = await chromium.launch({
-     args: [`--remote-debugging-port=${internalPort}`]
-   });
+2. **Inside the container, start the CDP proxy monitor:**
+   ```bash
+   nohup cdp-proxy-monitor > /tmp/cdp-proxy.log 2>&1 &
    ```
 
 3. **Connect from Chrome:**
-   - Open Chrome and navigate to `chrome://inspect`
+   - Forward port 9222 if the container is on a remote host: `ssh -L 9222:localhost:9222 user@docker-host`
+   - Open `chrome://inspect` in your local Chrome
    - Click "Configure..." and add `localhost:9222`
-   - Your Playwright browser sessions will appear under "Remote Target"
+   - Playwright-controlled browsers will appear as remote targets
 
-#### Usage Examples
-
-**Quick test script:**
+**Check the proxy log:**
 ```bash
-node -e "
-const { chromium } = require('playwright');
-(async () => {
-  const internalPort = parseInt(process.env.PLAYWRIGHT_CHROMIUM_DEBUG_PORT || '9222') + 1;
-  const browser = await chromium.launch({
-    args: ['--remote-debugging-port=' + internalPort]
-  });
-  const page = await browser.newPage();
-  await page.goto('https://example.com');
-  console.log('Browser ready on internal port', internalPort, '- connect via chrome://inspect');
-  await new Promise(() => {});
-})();
-"
-```
-
-**With docker compose:**
-```bash
-PLAYWRIGHT_CHROMIUM_DEBUG_PORT=9222 docker compose up -d claude
-docker compose exec claude bash  # Then run your Playwright script
-```
-
-**With VS Code Dev Container:**
-```bash
-# Set before opening dev container
-export PLAYWRIGHT_CHROMIUM_DEBUG_PORT=9222
+tail -f /tmp/cdp-proxy.log
 ```
 
 #### Security Note

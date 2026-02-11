@@ -47,7 +47,6 @@
     "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
-    "PLAYWRIGHT_CHROMIUM_DEBUG_PORT": "${localEnv:PLAYWRIGHT_CHROMIUM_DEBUG_PORT}",
     "PLAYWRIGHT_BROWSERS_PATH": "/opt/playwright-browsers",
     "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
     "VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}",
