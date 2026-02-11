@@ -618,6 +618,7 @@ Playwright MCP launches Chrome with a random `--remote-debugging-port` each time
    docker run -it --rm \
      --cap-add=NET_ADMIN \
      --cap-add=NET_RAW \
+     -e SKIP_FIREWALL=1 \
      -p 9222:9222 \
      claude-container:base
    ```
