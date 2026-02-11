@@ -1,3 +1,83 @@
+# TL;DR - just get me claude in a contaner, I'll think of security later!
+
+Make a folder with a workspace folder inside it: 
+
+```
+mkdir -p claude-container-instance/workspace
+```
+go into the folder and create a .env file
+
+```
+cd claude-container-instance
+nano .env
+```
+
+in the env file copy the following (.env.example): 
+
+```
+
+# Claude Container Environment Variables
+# Copy this file to .env and customize as needed
+# Usage: docker run --env-file .env ...
+
+# Claude configuration directory (inside container)
+CLAUDE_CONFIG_DIR=/home/node/.claude
+
+# GitHub Personal Access Token for gh CLI
+# GH_TOKEN=ghp_your_token_here
+
+# Git identity (used for commits inside the container)
+# GIT_USER_NAME=Your Name
+# GIT_USER_EMAIL=your.email@example.com
+
+# Timezone (defaults to Europe/Helsinki if not set)
+# TZ=America/New_York
+
+# Skip firewall initialization (set to 1 to disable)
+SKIP_FIREWALL=1
+
+# Playwright browsers path (pre-installed in image)
+PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+
+# Skip Playwright browser downloads (browsers are pre-installed)
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Notification URL (e.g., ntfy.sh) - called when Claude is idle or needs permission
+# Supports any URL that accepts POST requests (ntfy.sh, webhooks, etc.)
+# NOTIFICATION_URL=https://ntfy.sh/your-topic-here
+
+# Vaadin Pro/Commercial key (for Charts, Board, Acceleration Kits, etc.)
+# Alternatively, mount a ~/.vaadin/proKey file into the container
+# VAADIN_PRO_KEY=your-pro-key-here
+
+# Node.js memory limit
+NODE_OPTIONS=--max-old-space-size=4096
+```
+
+For a first test the above config disables the firewall, enables chrome CDP debuggin on port 9222 (if enabled inside the container etc). 
+
+* If you want to commit inside the container, you probably want to set the `GIT_USER` related params
+* If you want to use Vaadin commercial components, either set your `proKey` (just the value starting with `pro-` in the environment variable, or later inside the contaier `mkdir -p ~/.vaadin && nano ~/node/.vaadin/proKey` and copy your entire prokey from a different system (or follow the browser process to sign in...)
+* `GH_TOKEN` is there if you want to use Github fine graned PATs for limited access to GH from within the container
+* etc..
+
+
+then run the prebuilt container with (caches the .m2 folder on the host for less downloads on second try): 
+
+```
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --env-file .env \
+  -v "${HOME}/.m2-cache:/home/node/.m2" \
+  -v "$(pwd)/workspace/:/workspace" \
+  -p 9222:9222 \
+  ghcr.io/petrixh/claude-container:latest
+```
+
+Clone your projects, run claude do stuff :) 
+
+
 # Claude Container
 
 A Docker devcontainer for running Claude Code in a sandboxed environment with:
