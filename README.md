@@ -28,20 +28,21 @@ This repository provides three container variants:
 
 | Variant | Size | Docker | Best For | Limitations |
 |---------|------|--------|----------|-------------|
-| **`claude`** (base) | 3.47GB | ❌ No | General Claude Code development | No Docker support |
-| **`claude-docker-host`** ⭐ | 3.92GB | ✅ Via host | Docker development, testing | Requires host Docker |
+| **`claude`** (base) ⭐ | 3.47GB | ❌ No | General Claude Code development | No Docker support |
+| **`claude-docker-host`** | 3.92GB | ✅ Via host | Docker development, testing | Requires host Docker |
 | **`claude-dind`** | 3.92GB | ✅ Isolated | Secure isolation, CI/CD | Firewall blocks Docker Hub |
 
 ### Quick Decision Guide
 
-**Choose `claude` (base) if:**
+**Choose `claude` (base) if:** ⭐ RECOMMENDED
+- General development (Java, Node.js, etc.)
 - You don't need Docker inside the container
 - You want the smallest, fastest container
 
-**Choose `claude-docker-host` if:** ⭐ RECOMMENDED for Docker work
+**Choose `claude-docker-host` if:**
 - You need Docker and have Docker on your host
 - You want to pull from Docker Hub
-- You want lower resource usage
+- You want lower resource usage than DinD
 
 **Choose `claude-dind` if:**
 - You need complete isolation from host Docker
@@ -52,14 +53,14 @@ This repository provides three container variants:
 
 ### Most Common Use Cases
 
-**Standard Claude Code Development (no Docker):**
+**Standard Development (recommended):**
 ```bash
 docker compose up -d claude
 docker compose exec claude zsh
 claude --version
 ```
 
-**Docker Development (recommended):**
+**Docker Development (host socket):**
 ```bash
 docker compose up -d claude-docker-host
 docker compose exec claude-docker-host zsh
@@ -229,15 +230,14 @@ mv .devcontainer/devcontainer-dind.json .devcontainer/devcontainer.json
 
 ### When to Use Each Variant
 
-**Base Variant (`claude`)** - Recommended for most users
+**Base Variant (`claude`)** ⭐ Recommended
 - ✅ Standard Claude Code development
-- ✅ No Docker needed
-- ✅ Smaller image size (3.47GB)
-- ✅ Faster startup (~2 seconds)
-- ✅ Lower resource usage
-- Use when: You don't need Docker inside the container
+- ✅ Smallest image size (3.47GB)
+- ✅ Fastest startup (~2 seconds)
+- ✅ Lowest resource usage
+- Use when: General development without Docker needs (most users)
 
-**Host Socket Variant (`claude-docker-host`)** - Recommended for Docker development
+**Host Socket Variant (`claude-docker-host`)** - For Docker development
 - ✅ Access to Docker without firewall issues
 - ✅ Shares host Docker daemon and images
 - ✅ Lower resource usage than separate daemon
@@ -403,6 +403,8 @@ firewall-reload
 |----------|-------------|
 | `CLAUDE_CONFIG_DIR` | Directory for Claude authentication and config (mount from host for persistence) |
 | `GH_TOKEN` | GitHub Personal Access Token for `gh` CLI authentication |
+| `GIT_USER_NAME` | Git author/committer name (sets `git config --global user.name`) |
+| `GIT_USER_EMAIL` | Git author/committer email (sets `git config --global user.email`) |
 | `TZ` | Timezone (default: `Europe/Helsinki`). Pass `-e TZ=$TZ` to inherit from host |
 | `CLAUDE_CODE_VERSION` | Claude Code version to install (default: `latest`) |
 | `SKIP_FIREWALL` | Set to `1` to skip firewall initialization (useful for DinD troubleshooting) |
@@ -410,6 +412,92 @@ firewall-reload
 | `DOCKER_HOST` | Docker daemon socket (default: `unix:///var/run/docker.sock`) |
 | `PLAYWRIGHT_BROWSERS_PATH` | Path to pre-installed Playwright browsers (default: `/opt/playwright-browsers`) |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
+| `NOTIFICATION_URL` | URL to POST notifications to when Claude is idle or needs permission (e.g., `https://ntfy.sh/your-topic`) |
+| `VAADIN_PRO_KEY` | Vaadin Pro/Commercial subscription key for commercial components (Charts, Board, etc.) and Acceleration Kits |
+
+## Notifications
+
+The container can notify you when Claude needs attention via any URL that accepts POST requests (e.g., [ntfy.sh](https://ntfy.sh), Slack webhooks, custom endpoints).
+
+### Setup
+
+Set the `NOTIFICATION_URL` environment variable:
+```bash
+# In .env file
+NOTIFICATION_URL=https://ntfy.sh/your-topic-here
+
+# Or via docker run
+docker run -it --rm \
+  -e NOTIFICATION_URL=https://ntfy.sh/your-topic-here \
+  claude-container:base
+```
+
+The entrypoint automatically configures Claude Code hooks in `settings.json` for these events:
+
+| Event | Message |
+|-------|---------|
+| `idle_prompt` | Claude finished and is waiting for your input (60+ seconds idle) |
+| `permission_prompt` | Claude needs your permission to proceed |
+| `elicitation_dialog` | Claude is asking a question and waiting for your answer |
+
+### Additional Hook Events
+
+You can manually add more hooks to `~/.claude/settings.json` for these events:
+
+| Matcher / Event | Description |
+|-----------------|-------------|
+| `auth_success` | Authentication completed |
+| `Stop` (event, not matcher) | Claude finished responding (fires every time) |
+| `TaskCompleted` (event) | A task was marked as completed |
+
+See the [Claude Code hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) for the full reference.
+
+## Vaadin Commercial Components
+
+The container supports [Vaadin commercial components](https://vaadin.com/components) (Charts, Board, Grid Pro, etc.) and Acceleration Kits via the `VAADIN_PRO_KEY` environment variable.
+
+### Providing the Pro Key
+
+There are two ways to provide your Vaadin Pro subscription key:
+
+**Option 1: Environment variable (recommended for containers)**
+
+Set `VAADIN_PRO_KEY` in your `.env` file or pass it directly:
+```bash
+# In .env file
+VAADIN_PRO_KEY=your-pro-key-here
+
+# Or via docker run
+docker run -it --rm \
+  -e VAADIN_PRO_KEY=your-pro-key-here \
+  claude-container:base
+```
+
+**Option 2: Mount a proKey file**
+
+If you prefer file-based configuration, mount your `~/.vaadin/proKey` file from the host:
+```bash
+docker run -it --rm \
+  -v "${HOME}/.vaadin:/home/node/.vaadin:ro" \
+  claude-container:base
+```
+
+### Firewall Domains
+
+If you're using Vaadin commercial components with the firewall enabled, uncomment the Vaadin domains in `allowed-domains.conf`:
+```
+maven.vaadin.com
+tools.vaadin.com
+vaadin.com
+cdn.vaadin.com
+```
+
+Or add them at runtime:
+```bash
+# Inside the container
+echo -e "maven.vaadin.com\ntools.vaadin.com\nvaadin.com\ncdn.vaadin.com" | sudo tee -a /usr/local/etc/allowed-domains.conf
+firewall-reload
+```
 
 ## Playwright
 

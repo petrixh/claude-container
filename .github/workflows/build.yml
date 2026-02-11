@@ -21,7 +21,11 @@ jobs:
 
     strategy:
       matrix:
-        variant: [base, dind]
+        include:
+          - variant: base
+            image_suffix: ""
+          - variant: dind
+            image_suffix: "-dind"
 
     steps:
       - name: Checkout repository
@@ -45,9 +49,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            suffix=-${{ matrix.variant }},onlatest=true
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=
@@ -101,6 +103,24 @@ jobs:
               })();
             \"
           "
+
+      # Test Vaadin Pro Key passthrough
+      - name: Test Vaadin Pro Key support
+        if: matrix.variant == 'base'
+        run: |
+          echo "=== Testing VAADIN_PRO_KEY passthrough ==="
+          TEST_KEY="test-vaadin-pro-key-12345"
+
+          # Test: env var is available inside the container
+          echo "Test: VAADIN_PRO_KEY env var is accessible..."
+          docker run --rm \
+            -e VAADIN_PRO_KEY="${TEST_KEY}" \
+            -e SKIP_FIREWALL=1 \
+            claude-container:base-test \
+            bash -c '[ "${VAADIN_PRO_KEY}" = "'"${TEST_KEY}"'" ]'
+          echo "PASS: VAADIN_PRO_KEY env var is set correctly"
+
+          echo "=== All Vaadin Pro Key tests passed ==="
 
       # Build and push multi-platform images
       - name: Build and push
