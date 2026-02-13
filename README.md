@@ -3,7 +3,7 @@
 Make a folder with a workspace folder inside it: 
 
 ```
-mkdir -p claude-container-instance/workspace
+mkdir -p claude-container-instance/workspace claude-container-instance/dot-claude claude-container-instance/m2-cache 
 ```
 go into the folder and create a .env file
 
@@ -69,8 +69,9 @@ docker run -it --rm \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
   --env-file .env \
-  -v "${HOME}/.m2-cache:/home/node/.m2" \
-  -v "$(pwd)/workspace/:/workspace" \
+  -v "./dot-claude:/home/node/.claude" \
+  -v "./m2-cache:/home/node/.m2" \
+  -v "./workspace/:/workspace" \
   -p 9222:9222 \
   ghcr.io/petrixh/claude-container:latest
 ```
