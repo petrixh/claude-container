@@ -1,3 +1,5 @@
+This container is based on: https://code.claude.com/docs/en/devcontainer and https://github.com/anthropics/claude-code/tree/main/.devcontainer but somewhat heavily modified. 
+
 # TL;DR - just get me claude in a contaner, I'll think of security later!
 
 Make a folder with a workspace folder inside it: 
