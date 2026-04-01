@@ -122,6 +122,25 @@ HOOKEOF
     echo "Notification hooks configured for: ${NOTIFICATION_URL}"
 fi
 
+# Configure default MCP servers using claude mcp add-json (user scope)
+# Only adds if not already configured (avoids overwriting user customizations)
+CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-/home/node/.claude}/.claude.json"
+add_mcp_if_missing() {
+    local name="$1"
+    local json="$2"
+    if [[ -f "${CLAUDE_JSON}" ]] && jq -e ".mcpServers.\"${name}\"" "${CLAUDE_JSON}" > /dev/null 2>&1; then
+        echo "  MCP '${name}' already configured, skipping"
+    else
+        claude mcp add-json --scope user "${name}" "${json}" 2>/dev/null && \
+            echo "  MCP '${name}' added" || \
+            echo "  Warning: Failed to add MCP '${name}'"
+    fi
+}
+
+echo "Configuring default MCP servers..."
+add_mcp_if_missing "Vaadin" '{"type":"http","url":"https://mcp.vaadin.com/docs"}'
+add_mcp_if_missing "playwright" '{"command":"npx","args":["@playwright/mcp@latest","--headless","--browser","chromium"]}'
+
 # Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)
 # This requires NET_ADMIN capability to be set
 if [[ "${SKIP_FIREWALL:-0}" == "1" ]]; then
