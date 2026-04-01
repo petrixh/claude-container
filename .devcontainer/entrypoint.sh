@@ -4,6 +4,10 @@
 
 set -e
 
+# Ensure CLAUDE_CONFIG_DIR is set so claude CLI writes config to the correct
+# directory (the one that gets bind-mounted / volume-mounted for persistence)
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/node/.claude}"
+
 # Display welcome message with version info
 echo "========================================"
 echo "  Claude Code Container"
@@ -124,11 +128,10 @@ fi
 
 # Configure default MCP servers using claude mcp add-json (user scope)
 # Only adds if not already configured (avoids overwriting user customizations)
-CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-/home/node/.claude}/.claude.json"
 add_mcp_if_missing() {
     local name="$1"
     local json="$2"
-    if [[ -f "${CLAUDE_JSON}" ]] && jq -e ".mcpServers.\"${name}\"" "${CLAUDE_JSON}" > /dev/null 2>&1; then
+    if claude mcp get "${name}" > /dev/null 2>&1; then
         echo "  MCP '${name}' already configured, skipping"
     else
         claude mcp add-json --scope user "${name}" "${json}" 2>/dev/null && \
