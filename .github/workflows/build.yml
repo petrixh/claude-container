@@ -125,6 +125,60 @@ jobs:
 
           echo "=== All Vaadin Pro Key tests passed ==="
 
+      # Test default MCP server configuration
+      - name: Test default MCP servers
+        if: matrix.variant == 'base'
+        run: |
+          echo "=== Testing default MCP server provisioning ==="
+
+          # Run the container (entrypoint configures MCPs) and verify with claude mcp list
+          docker run --rm -e SKIP_FIREWALL=1 claude-container:base-test \
+            bash -c '
+              echo "Checking claude mcp list output..."
+              OUTPUT=$(claude mcp list 2>&1)
+              echo "${OUTPUT}"
+
+              echo ""
+              echo "Validating MCP servers..."
+              FAIL=0
+
+              if echo "${OUTPUT}" | grep -q "Vaadin.*Connected"; then
+                echo "PASS: Vaadin MCP connected"
+              else
+                echo "FAIL: Vaadin MCP not connected"
+                FAIL=1
+              fi
+
+              if echo "${OUTPUT}" | grep -q "playwright.*Connected"; then
+                echo "PASS: Playwright MCP connected"
+              else
+                echo "FAIL: Playwright MCP not connected"
+                FAIL=1
+              fi
+
+              exit ${FAIL}
+            '
+
+          echo ""
+          echo "--- Testing idempotency (second run should skip) ---"
+          docker volume create mcp-test-claude
+          # First run: entrypoint adds MCPs
+          docker run --rm -e SKIP_FIREWALL=1 -v mcp-test-claude:/home/node/.claude \
+            claude-container:base-test bash -c 'echo "First run done"'
+          # Second run: same volume, entrypoint should skip
+          docker run --rm -e SKIP_FIREWALL=1 -v mcp-test-claude:/home/node/.claude \
+            claude-container:base-test bash -c 'echo "Second run done"' 2>&1 | tee /tmp/mcp-idempotency.log
+          docker volume rm mcp-test-claude
+
+          if grep -q "already configured" /tmp/mcp-idempotency.log; then
+            echo "PASS: Idempotency check - servers correctly skipped on second run"
+          else
+            echo "FAIL: Idempotency check - servers were re-added instead of skipped"
+            exit 1
+          fi
+
+          echo "=== All MCP server tests passed ==="
+
       # Build and push multi-platform images
       - name: Build and push
         uses: docker/build-push-action@v6
