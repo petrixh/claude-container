@@ -144,14 +144,24 @@ RUN echo '\n# Claude Code aliases' >> /home/node/.zshrc \
 # ========================================
 FROM base-common AS base
 
+# CLAUDE_CODE_VERSION: pass "latest" (default), "stable", or a specific
+# version like "2.1.126". The installer always downloads the newest binary
+# and uses this value to set the active launcher target.
 ARG CLAUDE_CODE_VERSION=latest
 ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
 
 USER root
 
-# Install Claude Code globally
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-    && chown -R node:node /usr/local/lib/node_modules /usr/local/bin
+# Install Claude Code via the official bash installer.
+# Runs as `node` so the binary lands in /home/node/.local/share/claude/...
+# with a symlink at /home/node/.local/bin/claude. We add a second symlink
+# in /usr/local/bin so the CLI is on PATH for any user.
+RUN if [ "${CLAUDE_CODE_VERSION}" = "latest" ]; then \
+      su - node -c "curl -fsSL https://claude.ai/install.sh | bash"; \
+    else \
+      su - node -c "curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}"; \
+    fi \
+    && ln -sf /home/node/.local/bin/claude /usr/local/bin/claude
 
 # Copy firewall, entrypoint, and helper scripts
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh
