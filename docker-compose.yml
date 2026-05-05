@@ -112,6 +112,41 @@ services:
     stdin_open: true
     tty: true
 
+  # === OpenCode variant (npm-installed sst/opencode, no DinD) ===
+  opencode:
+    build:
+      context: .devcontainer
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-Europe/Helsinki}
+        OPENCODE_VERSION: latest
+        VARIANT: opencode
+      target: opencode
+    container_name: opencode-container
+    hostname: opencode-dev
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ${HOME}/.config/opencode:/home/node/.config/opencode:cached
+      - ${HOME}/.local/share/opencode:/home/node/.local/share/opencode:cached
+      - ./:/workspace:delegated
+      - opencode-bashhistory:/commandhistory
+    environment:
+      - TZ=${TZ:-Europe/Helsinki}
+      - GH_TOKEN=${GH_TOKEN}
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - DEVCONTAINER=true
+      - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
+    ports:
+      - "9222:9222"
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
 volumes:
   claude-bashhistory:
   claude-docker-data:
+  opencode-bashhistory:

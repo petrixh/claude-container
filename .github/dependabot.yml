@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Track the Node base image (FROM node:<version>-<release> in .devcontainer/Dockerfile).
+  # Triggers PRs when a new Node minor/patch or Debian release tag is published.
+  - package-ecosystem: docker
+    directory: /.devcontainer
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+
+  # Track GitHub Actions versions referenced in .github/workflows/*.yml.
+  # Triggers PRs when actions/checkout, docker/build-push-action, etc. ship new majors.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+
+  # Note: npm packages installed inside the container (playwright, @playwright/mcp,
+  # opencode-ai, claude install script) are intentionally NOT tracked here. They are
+  # pulled fresh on every image build, and the workflow runs weekly on cron, so the
+  # next image rebuild always uses the latest versions without dependabot churn.

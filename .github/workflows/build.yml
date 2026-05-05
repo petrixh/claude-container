@@ -27,8 +27,11 @@ jobs:
         include:
           - variant: base
             image_suffix: ""
-          - variant: dind
-            image_suffix: "-dind"
+          # dind variant temporarily disabled — re-enable by uncommenting.
+          # - variant: dind
+          #   image_suffix: "-dind"
+          - variant: opencode
+            image_suffix: "-opencode"
 
     steps:
       - name: Checkout repository
@@ -71,12 +74,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Test Playwright in base variant
+      # Test Playwright (base + opencode share the playwright layer)
       - name: Test Playwright installation
-        if: matrix.variant == 'base'
+        if: matrix.variant == 'base' || matrix.variant == 'opencode'
         run: |
-          echo "=== Testing Playwright browsers ==="
-          docker run --rm --entrypoint /bin/bash claude-container:base-test -c "
+          echo "=== Testing Playwright browsers (${{ matrix.variant }}) ==="
+          docker run --rm --entrypoint /bin/bash claude-container:${{ matrix.variant }}-test -c "
             echo 'Checking browser directory ownership...'
             ls -la /opt/playwright-browsers/
 
@@ -107,11 +110,11 @@ jobs:
             \"
           "
 
-      # Test Vaadin Pro Key passthrough
+      # Test Vaadin Pro Key passthrough (base + opencode)
       - name: Test Vaadin Pro Key support
-        if: matrix.variant == 'base'
+        if: matrix.variant == 'base' || matrix.variant == 'opencode'
         run: |
-          echo "=== Testing VAADIN_PRO_KEY passthrough ==="
+          echo "=== Testing VAADIN_PRO_KEY passthrough (${{ matrix.variant }}) ==="
           TEST_KEY="test-vaadin-pro-key-12345"
 
           # Test: env var is available inside the container
@@ -119,11 +122,24 @@ jobs:
           docker run --rm \
             -e VAADIN_PRO_KEY="${TEST_KEY}" \
             -e SKIP_FIREWALL=1 \
-            claude-container:base-test \
+            claude-container:${{ matrix.variant }}-test \
             bash -c '[ "${VAADIN_PRO_KEY}" = "'"${TEST_KEY}"'" ]'
           echo "PASS: VAADIN_PRO_KEY env var is set correctly"
 
           echo "=== All Vaadin Pro Key tests passed ==="
+
+      # Test OpenCode CLI is installed and runnable
+      - name: Test OpenCode installation
+        if: matrix.variant == 'opencode'
+        run: |
+          echo "=== Testing OpenCode CLI ==="
+          docker run --rm --entrypoint /bin/bash \
+            -e SKIP_FIREWALL=1 \
+            claude-container:opencode-test -c "
+              command -v opencode || { echo 'opencode not found on PATH'; exit 1; }
+              opencode --version
+            "
+          echo "PASS: opencode CLI is installed"
 
       # Build and push multi-platform images
       - name: Build and push

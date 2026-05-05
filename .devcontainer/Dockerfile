@@ -1,21 +1,21 @@
-# Claude Code Development Container
+# Coding Agent Development Container
 # Based on the official reference implementation with Java 21 support
-# Multi-stage build supporting base and Docker-in-Docker variants
+# Multi-stage build supporting base (Claude Code), opencode, and Docker-in-Docker variants
 
-ARG NODE_VERSION=20
+ARG NODE_VERSION=22
 ARG VARIANT=base
 
 # ========================================
 # BASE-COMMON STAGE (shared dependencies)
+# Agent-agnostic: tools, Java, Playwright, browsers.
+# Agent CLIs (Claude Code, OpenCode) are added in downstream stages.
 # ========================================
-FROM node:${NODE_VERSION}-bookworm AS base-common
+FROM node:${NODE_VERSION}-trixie AS base-common
 
 ARG TZ=Europe/Helsinki
-ARG CLAUDE_CODE_VERSION=latest
 
 ENV TZ=${TZ} \
     DEBIAN_FRONTEND=noninteractive \
-    CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     NODE_PATH=/usr/local/lib/node_modules \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -72,9 +72,6 @@ RUN mkdir -p /etc/apt/keyrings \
 RUN ln -s /usr/lib/jvm/temurin-21-jdk-* /usr/lib/jvm/temurin-21-jdk
 ENV JAVA_HOME=/usr/lib/jvm/temurin-21-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
-
-# Install Claude Code globally
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Install Playwright globally with Chromium browser (full + headless shell)
 # Pre-install browsers so they're included in the image and don't need to be downloaded at runtime
@@ -143,11 +140,28 @@ RUN echo '\n# Claude Code aliases' >> /home/node/.zshrc \
     && echo 'SAVEHIST=10000' >> /home/node/.zshrc
 
 # ========================================
-# BASE STAGE (current container)
+# BASE STAGE (Claude Code)
 # ========================================
 FROM base-common AS base
 
+# CLAUDE_CODE_VERSION: pass "latest" (default), "stable", or a specific
+# version like "2.1.126". The installer always downloads the newest binary
+# and uses this value to set the active launcher target.
+ARG CLAUDE_CODE_VERSION=latest
+ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
+
 USER root
+
+# Install Claude Code via the official bash installer.
+# Runs as `node` so the binary lands in /home/node/.local/share/claude/...
+# with a symlink at /home/node/.local/bin/claude. We add a second symlink
+# in /usr/local/bin so the CLI is on PATH for any user.
+RUN if [ "${CLAUDE_CODE_VERSION}" = "latest" ]; then \
+      su - node -c "curl -fsSL https://claude.ai/install.sh | bash"; \
+    else \
+      su - node -c "curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}"; \
+    fi \
+    && ln -sf /home/node/.local/bin/claude /usr/local/bin/claude
 
 # Copy firewall, entrypoint, and helper scripts
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh
@@ -169,9 +183,50 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/zsh"]
 
 # ========================================
-# DIND STAGE (Docker-in-Docker)
+# OPENCODE STAGE (sst/opencode)
 # ========================================
-FROM base-common AS dind
+FROM base-common AS opencode
+
+# OPENCODE_VERSION: pass "latest" (default) or a specific version like "1.14.33"
+ARG OPENCODE_VERSION=latest
+ENV OPENCODE_VERSION=${OPENCODE_VERSION}
+
+USER root
+
+# Install OpenCode via the official bash installer.
+# Runs as `node` so the binary lands in /home/node/.opencode/bin/opencode,
+# then symlinked into /usr/local/bin for system-wide PATH availability.
+# Tar is already provided by the node:trixie base image.
+RUN if [ "${OPENCODE_VERSION}" = "latest" ]; then \
+      su - node -c "curl -fsSL https://opencode.ai/install | bash"; \
+    else \
+      su - node -c "curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION}"; \
+    fi \
+    && ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode
+
+# Copy firewall, entrypoint, and helper scripts
+COPY init-firewall.sh /usr/local/bin/init-firewall.sh
+COPY entrypoint-opencode.sh /usr/local/bin/entrypoint.sh
+COPY playwright-info.sh /usr/local/bin/playwright-info
+COPY cdp-proxy-monitor.sh /usr/local/bin/cdp-proxy-monitor
+COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/playwright-info /usr/local/bin/cdp-proxy-monitor
+
+# Set working directory and ensure node user owns it
+RUN mkdir -p /workspace && chown node:node /workspace
+WORKDIR /workspace
+
+# Switch to node user
+USER node
+
+# Set entrypoint and default command
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/bin/zsh"]
+
+# ========================================
+# DIND STAGE (Claude Code + Docker-in-Docker)
+# ========================================
+FROM base AS dind
 
 USER root
 
@@ -182,7 +237,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | \
        gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" | \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" | \
        tee /etc/apt/sources.list.d/docker.list > /dev/null \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
