@@ -146,7 +146,48 @@ services:
     stdin_open: true
     tty: true
 
+  # === OpenCode DinD variant (separate Docker daemon) ===
+  opencode-dind:
+    build:
+      context: .devcontainer
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-Europe/Helsinki}
+        OPENCODE_VERSION: latest
+        VARIANT: opencode-dind
+      target: opencode-dind
+    container_name: opencode-container-dind
+    hostname: opencode-dev-dind
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ${HOME}/.config/opencode:/home/node/.config/opencode:cached
+      - ${HOME}/.local/share/opencode:/home/node/.local/share/opencode:cached
+      - ./:/workspace:delegated
+      - opencode-bashhistory:/commandhistory
+      - opencode-docker-data:/var/lib/docker
+    environment:
+      - TZ=${TZ:-Europe/Helsinki}
+      - GH_TOKEN=${GH_TOKEN}
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - DEVCONTAINER=true
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
+    ports:
+      - "9222:9222"
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
 volumes:
   claude-bashhistory:
   claude-docker-data:
   opencode-bashhistory:
+  opencode-docker-data:

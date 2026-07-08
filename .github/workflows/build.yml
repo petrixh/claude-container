@@ -35,6 +35,8 @@ jobs:
             image_suffix: "-dind"
           - variant: opencode
             image_suffix: "-opencode"
+          - variant: opencode-dind
+            image_suffix: "-opencode-dind"
 
     steps:
       - name: Checkout repository
@@ -139,16 +141,36 @@ jobs:
 
       # Test OpenCode CLI is installed and runnable
       - name: Test OpenCode installation
-        if: matrix.variant == 'opencode'
+        if: matrix.variant == 'opencode' || matrix.variant == 'opencode-dind'
         run: |
-          echo "=== Testing OpenCode CLI ==="
+          echo "=== Testing OpenCode CLI (${{ matrix.variant }}) ==="
           docker run --rm --entrypoint /bin/bash \
             -e SKIP_FIREWALL=1 \
-            claude-container:opencode-test -c "
+            claude-container:${{ matrix.variant }}-test -c "
               command -v opencode || { echo 'opencode not found on PATH'; exit 1; }
               opencode --version
             "
           echo "PASS: opencode CLI is installed"
+
+      # Test the Docker daemon starts and works inside the DinD variants.
+      # Bypasses the DinD entrypoint (which also inits the firewall) and starts
+      # dockerd directly so the check is isolated to Docker itself.
+      - name: Test Docker-in-Docker daemon
+        if: matrix.variant == 'dind' || matrix.variant == 'opencode-dind'
+        run: |
+          echo "=== Testing Docker-in-Docker daemon (${{ matrix.variant }}) ==="
+          docker run --rm --privileged --entrypoint /bin/bash \
+            -e SKIP_FIREWALL=1 \
+            claude-container:${{ matrix.variant }}-test -c '
+              set -e
+              command -v docker || { echo "docker not found on PATH"; exit 1; }
+              sudo dockerd > /tmp/dockerd.log 2>&1 &
+              echo "Waiting for dockerd..."
+              for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
+              docker info >/dev/null 2>&1 || { echo "dockerd failed to start"; cat /tmp/dockerd.log; exit 1; }
+              docker version
+            '
+          echo "PASS: dockerd starts and responds"
 
       # Test the Playwright Agent CLI is installed, the skill is baked in, and it
       # can launch the pre-installed Chromium offline (no runtime browser download).

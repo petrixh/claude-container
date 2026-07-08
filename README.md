@@ -243,13 +243,21 @@ Before running the container, ensure:
 
 ## Container Variants
 
-This repository provides three container variants:
+This repository provides Claude Code and OpenCode variants. The Claude Code variants:
 
 | Variant | Size | Docker | Best For | Limitations |
 |---------|------|--------|----------|-------------|
 | **`claude`** (base) ⭐ | 3.47GB | ❌ No | General Claude Code development | No Docker support |
 | **`claude-docker-host`** | 3.92GB | ✅ Via host | Docker development, testing | Requires host Docker |
 | **`claude-dind`** | 3.92GB | ✅ Isolated | Secure isolation, CI/CD | Firewall blocks Docker Hub |
+
+The OpenCode variants swap Claude Code for [sst/opencode](https://opencode.ai) but share the
+same base (Java, Playwright, firewall, Playwright Agent CLI skill):
+
+| Variant | Docker | Best For | Limitations |
+|---------|--------|----------|-------------|
+| **`opencode`** | ❌ No | General OpenCode development | No Docker support |
+| **`opencode-dind`** | ✅ Isolated | OpenCode + isolated Docker daemon | Firewall blocks Docker Hub |
 
 ### Quick Decision Guide
 
@@ -301,6 +309,12 @@ docker build -t claude-container:base --target base .devcontainer/
 
 # DinD variant (both claude-dind and claude-docker-host use this)
 docker build -t claude-container:dind --target dind .devcontainer/
+
+# OpenCode variant
+docker build -t claude-container:opencode --target opencode .devcontainer/
+
+# OpenCode DinD variant (isolated Docker daemon)
+docker build -t claude-container:opencode-dind --target opencode-dind .devcontainer/
 ```
 
 ### Interactive Shell Options
@@ -324,6 +338,12 @@ docker compose up -d claude-dind && docker compose exec claude-dind zsh
 
 # DinD variant mounting host Docker socket
 docker compose up -d claude-docker-host && docker compose exec claude-docker-host zsh
+
+# OpenCode variant
+docker compose up -d opencode && docker compose exec opencode zsh
+
+# OpenCode DinD variant (separate Docker daemon)
+docker compose up -d opencode-dind && docker compose exec opencode-dind zsh
 ```
 
 ### Option 2: Interactive Shell (Docker Run)
@@ -441,6 +461,19 @@ devcontainer up --workspace-folder . \
 # Or rename the config (backup original first)
 mv .devcontainer/devcontainer.json .devcontainer/devcontainer-base.json
 mv .devcontainer/devcontainer-dind.json .devcontainer/devcontainer.json
+```
+
+### OpenCode Variants
+Use the OpenCode configurations to run [sst/opencode](https://opencode.ai) instead of Claude Code:
+
+```bash
+# OpenCode (no Docker)
+devcontainer up --workspace-folder . \
+  --config .devcontainer/devcontainer-opencode.json
+
+# OpenCode with Docker-in-Docker (isolated daemon)
+devcontainer up --workspace-folder . \
+  --config .devcontainer/devcontainer-opencode-dind.json
 ```
 
 ## Docker-in-Docker Usage

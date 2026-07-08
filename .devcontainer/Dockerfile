@@ -1,6 +1,7 @@
 # Coding Agent Development Container
 # Based on the official reference implementation with Java 21 support
-# Multi-stage build supporting base (Claude Code), opencode, and Docker-in-Docker variants
+# Multi-stage build supporting base (Claude Code), opencode, and their
+# Docker-in-Docker variants (dind, opencode-dind)
 
 ARG NODE_VERSION=22
 ARG VARIANT=base
@@ -233,46 +234,14 @@ FROM base AS dind
 
 USER root
 
-# Install Docker CE
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg | \
-       gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" | \
-       tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        docker-ce \
-        docker-ce-cli \
-        containerd.io \
-        docker-buildx-plugin \
-        docker-compose-plugin \
-    && rm -rf /var/lib/apt/lists/*
-
-# Configure Docker daemon
-RUN mkdir -p /etc/docker && cat > /etc/docker/daemon.json <<'EOF'
-{
-  "storage-driver": "overlay2",
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "10m",
-    "max-file": "3"
-  },
-  "features": {
-    "buildkit": true
-  }
-}
-EOF
+# Install Docker CE and configure the daemon (shared with opencode-dind).
+COPY install-docker.sh /usr/local/bin/install-docker.sh
+RUN chmod +x /usr/local/bin/install-docker.sh && /usr/local/bin/install-docker.sh
 
 # Add node user to docker group
 RUN usermod -aG docker node
 
-# Create Docker data directory
-RUN mkdir -p /var/lib/docker /var/log && chmod 755 /var/lib/docker
-
-# Copy scripts (including new DinD entrypoint)
+# Copy scripts (including the DinD entrypoint)
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
@@ -285,6 +254,35 @@ RUN chmod +x /usr/local/bin/init-firewall.sh \
 
 # Set working directory and ensure node user owns it
 RUN mkdir -p /workspace && chown node:node /workspace
+WORKDIR /workspace
+USER node
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-dind.sh"]
+CMD ["/bin/zsh"]
+
+# ========================================
+# OPENCODE-DIND STAGE (OpenCode + Docker-in-Docker)
+# ========================================
+# Same Docker-in-Docker setup as the `dind` stage, but on top of the OpenCode
+# agent instead of Claude Code. The DinD entrypoint is agent-agnostic: it starts
+# dockerd, then execs /usr/local/bin/entrypoint.sh — which the opencode stage
+# already installed as the OpenCode entrypoint.
+FROM opencode AS opencode-dind
+
+USER root
+
+# Install Docker CE and configure the daemon (shared with dind).
+COPY install-docker.sh /usr/local/bin/install-docker.sh
+RUN chmod +x /usr/local/bin/install-docker.sh && /usr/local/bin/install-docker.sh
+
+# Add node user to docker group
+RUN usermod -aG docker node
+
+# Copy the DinD entrypoint (other scripts were installed by the opencode stage,
+# whose entrypoint-opencode.sh already lives at /usr/local/bin/entrypoint.sh).
+COPY entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
+RUN chmod +x /usr/local/bin/entrypoint-dind.sh
+
 WORKDIR /workspace
 USER node
 
