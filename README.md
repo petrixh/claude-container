@@ -137,7 +137,7 @@ then create a deccontainer file under `.devcontainer/devcontainer.json` with the
 //  },
   "remoteUser": "node",
   "mounts": [
-    "source=./m2-cache,target=/home/vscode/.m2,type=bind,consistency=cached",
+    "source=./m2-cache,target=/home/node/.m2,type=bind,consistency=cached",
     //     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=./dot-claude,target=/home/node/.claude,type=bind,consistency=cached"
   ],
