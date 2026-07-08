@@ -259,6 +259,25 @@ same base (Java, Playwright, firewall, Playwright Agent CLI skill):
 | **`opencode`** | ❌ No | General OpenCode development | No Docker support |
 | **`opencode-dind`** | ✅ Isolated | OpenCode + isolated Docker daemon | Firewall blocks Docker Hub |
 
+**Quick test of `opencode-dind`** — pull the published image and drop into a shell with a working, isolated Docker daemon:
+
+```bash
+docker run --rm -it --privileged \
+  -v claude-docker-data:/var/lib/docker \
+  -e SKIP_FIREWALL=1 \
+  ghcr.io/petrixh/claude-container-opencode-dind:latest zsh
+```
+
+Then, inside the container, confirm the nested daemon works:
+
+```bash
+docker run --rm alpine:latest echo "Hello from Docker-in-Docker"
+```
+
+Notes:
+- `--privileged` + the `claude-docker-data` volume are required for the inner daemon — the volume gives `/var/lib/docker` a non-overlay backing filesystem, otherwise `overlay2` can't mount on an overlay-backed container rootfs.
+- `SKIP_FIREWALL=1` lets the daemon pull from Docker Hub. With the firewall on, Docker Hub's CDN domains are blocked (see [Known Limitations](#known-limitations-and-workarounds)); for real Docker development use the host-socket approach instead.
+
 ### Quick Decision Guide
 
 **Choose `claude` (base) if:** ⭐ RECOMMENDED
