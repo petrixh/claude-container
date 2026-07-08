@@ -155,6 +155,13 @@ jobs:
       # Test the Docker daemon starts and works inside the DinD variants.
       # Bypasses the DinD entrypoint (which also inits the firewall) and starts
       # dockerd directly so the check is isolated to Docker itself.
+      #
+      # The daemon runs with the `vfs` storage driver via a throwaway config
+      # file: the runner's own Docker storage is overlay2, and overlay cannot be
+      # mounted on top of overlay ("failed to mount overlay: invalid argument"),
+      # so the baked overlay2 daemon.json can't start nested here. vfs needs no
+      # overlay support and exercises the same path — dockerd boots and the CLI
+      # talks to it. The image keeps overlay2 for real hosts, which support it.
       - name: Test Docker-in-Docker daemon
         if: matrix.variant == 'dind' || matrix.variant == 'opencode-dind'
         run: |
@@ -164,7 +171,8 @@ jobs:
             claude-container:${{ matrix.variant }}-test -c '
               set -e
               command -v docker || { echo "docker not found on PATH"; exit 1; }
-              sudo dockerd > /tmp/dockerd.log 2>&1 &
+              printf "{\"storage-driver\":\"vfs\"}" | sudo tee /tmp/daemon-vfs.json >/dev/null
+              sudo dockerd --config-file=/tmp/daemon-vfs.json > /tmp/dockerd.log 2>&1 &
               echo "Waiting for dockerd..."
               for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
               docker info >/dev/null 2>&1 || { echo "dockerd failed to start"; cat /tmp/dockerd.log; exit 1; }
