@@ -1,14 +1,14 @@
 # OpenCode V2 — Upgrade Requirements for This Container
 
 Investigation for [#30](https://github.com/petrixh/claude-container/issues/30).
-Reference: <https://opencode.ai/v2/docs/migrate-v1/>
+Reference: [https://opencode.ai/v2/docs/migrate-v1/](https://opencode.ai/v2/docs/migrate-v1/)
 
 **Status:** investigation only — no container files changed yet.
 
-**Verified against:** OpenCode **v2.0.1** (current `latest` on the v2 channel) installed
-from `https://opencode.ai/v2/install` on linux/arm64 (glibc), compared against the
+**Verified against:** OpenCode **v2.0.1** and **v2.0.3**, installed from
+`https://opencode.ai/v2/install` on linux/arm64 (glibc) and compared against the
 **v1.18.30** binary. Everything marked *(verified)* was observed directly by running the
-binary; everything else comes from the official docs.
+binary or fetching the endpoint; everything else comes from the official docs.
 
 ---
 
@@ -16,12 +16,14 @@ binary; everything else comes from the official docs.
 
 The container itself needs **four small changes** plus **one mount-strategy decision**:
 
-| # | Change | Where | Severity |
-|---|--------|-------|----------|
-| 1 | Install URL `opencode.ai/install` → `opencode.ai/v2/install` | `Dockerfile` (opencode stage) | Required |
-| 2 | Allow `models.opencode.ai` through the firewall | `allowed-domains.conf` | Required (already broken for v1) |
-| 3 | Consolidate state into one `~/.opencode` bind mount (matches `~/.claude`) | `Dockerfile`, `docker-compose.yml`, `devcontainer-opencode*.json` | **Required — data-loss risk** |
-| 4 | Document the new background-service model and `/connect` auth | `README.md`, `entrypoint-opencode.sh` | Recommended |
+
+| #   | Change                                                                    | Where                                                             | Severity                         |
+| --- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------- |
+| 1   | Install URL `opencode.ai/install` → `opencode.ai/v2/install`              | `Dockerfile` (opencode stage)                                     | Required                         |
+| 2 | Document `models.opencode.ai` as a commented-out opt-in; note that `opencode.ai` is also the Zen inference endpoint | `allowed-domains.conf` | Recommended |
+| 3   | Consolidate state into one `~/.opencode` bind mount (matches `~/.claude`) | `Dockerfile`, `docker-compose.yml`, `devcontainer-opencode*.json` | **Required — data-loss risk**    |
+| 4   | Document the new background-service model and `/connect` auth             | `README.md`, `entrypoint-opencode.sh`                             | Recommended                      |
+
 
 Everything else in the image keeps working unchanged: install directory, the
 `/usr/local/bin/opencode` symlink, the baked-in Playwright Agent CLI skill, Java,
@@ -33,83 +35,200 @@ at it.
 
 ---
 
-## 1. Distribution and install *(verified)*
+## 1. Distribution and install *(verified)* 
 
-| | V1 | V2 |
-|---|---|---|
-| Install script | `https://opencode.ai/install` | `https://opencode.ai/v2/install` |
-| Artifact source | `github.com/anomalyco/opencode/releases` (+ `api.github.com` for the latest tag) | `registry.npmjs.org/@opencode/cli-<os>-<arch>/-/cli-<target>-<ver>.tgz` |
-| Version metadata | GitHub releases API | `https://opencode.ai/update/api/beta/cli/npm` |
-| npm package | `opencode-ai` | `@opencode/cli` |
-| Docker image | — | `ghcr.io/anomalyco/opencode:<version>` |
-| Binary size (linux/arm64) | 176 MB | 193 MB |
-| `--version` output | `1.18.30` | `opencode v2.0.1` |
+
+|                           | V1                                                                               | V2                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Install script            | `https://opencode.ai/install`                                                    | `https://opencode.ai/v2/install`                                        |
+| Artifact source           | `github.com/anomalyco/opencode/releases` (+ `api.github.com` for the latest tag) | `registry.npmjs.org/@opencode/cli-<os>-<arch>/-/cli-<target>-<ver>.tgz` |
+| Version metadata | GitHub releases API | `https://opencode.ai/update/api/beta/cli/npm` — **see the channel trap below** |
+| npm package               | `opencode-ai`                                                                    | `@opencode/cli`                                                         |
+| Docker image              | —                                                                                | `ghcr.io/anomalyco/opencode:<version>`                                  |
+| Binary size (linux/arm64) | 176 MB                                                                           | 193 MB                                                                  |
+| `--version` output | `1.18.30` | `opencode v2.0.3` |
+
 
 **Unchanged and therefore safe:**
 
 - `INSTALL_DIR` is still `$HOME/.opencode/bin` — the Dockerfile's
-  `ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode` still resolves.
+`ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode` still resolves.
 - Flags are identical: `-v/--version <ver>`, `--binary <path>`, `--no-modify-path`.
-  The existing `bash -s -- --version ${OPENCODE_VERSION}` invocation works as-is.
+The existing `bash -s -- --version ${OPENCODE_VERSION}` invocation works as-is.
 - Build prerequisites are the same (`curl`, `tar`, `sed`, `mkfifo`) — all present in
-  `base-common`.
+`base-common`.
 
 **Note:** V2 also drops a tiny `opencode2` shim next to the binary
 (`exec "$(dirname "$0")/opencode" "$@"`). Harmless; no symlink needed for it.
 
+### The channel trap — `latest` is *not* what the script installs
+
+The published v2 installer hardcodes the **`beta`** channel:
+
+```bash
+metadata=$(curl -fsSL https://opencode.ai/update/api/beta/cli/npm || true)
+```
+
+That endpoint is stale. Checked side by side *(verified)*:
+
+| Source | Version |
+|---|---|
+| `opencode.ai/update/api/beta/cli/npm` (what the script uses) | **2.0.1** |
+| `opencode.ai/update/api/latest/cli/npm` | **2.0.3** |
+| npm `@opencode/cli` dist-tag `latest` | **2.0.3** |
+| npm dist-tag `beta` | `0.0.0-beta-19507` |
+| npm dist-tag `dev` | `0.0.0-dev-19638` |
+
+So `OPENCODE_VERSION=latest` today silently builds **2.0.1**, three patch releases
+behind — which is exactly why the first pass of this document was written against 2.0.1.
+These are ordinary releases, not prereleases: v2.0.2 and v2.0.3 are published on GitHub
+with `prerelease: false`. The `beta` name in the URL looks like a leftover from the v2
+prerelease period that was never repointed. (The GitHub *releases* API is no help either
+— `releases/latest` still returns **v1.18.31**, since v1 and v2 share a repo.)
+
+`stable`, `v2` and `release` are not valid channels (404). Only `beta` and `latest` exist.
+
+**Recommendation: never rely on the script's default.** Resolve the `latest` channel
+explicitly and pass it through — `jq` is already in the image:
+
+```dockerfile
+RUN if [ "${OPENCODE_VERSION}" = "latest" ]; then \
+      OPENCODE_VERSION=$(curl -fsSL https://opencode.ai/update/api/latest/cli/npm | jq -r .version); \
+    fi \
+ && su - node -c "curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path --version ${OPENCODE_VERSION}"
+```
+
+*(Verified: resolving the endpoint and passing `--version 2.0.3` installs
+`opencode v2.0.3`.)* This also makes every build log the exact version it baked in, which
+is what the weekly scheduled build needs.
+
+The alternative is `npm install -g @opencode/cli`, which resolves the npm `latest`
+dist-tag correctly and would also sidestep §4's install-directory problem — worth
+considering, though it adds a postinstall step that picks the native binary.
+
 ### Suggested Dockerfile change
 
-Make the channel a build arg so the v1 image stays reproducible:
+Channel as a build arg so a v1 image stays buildable, `latest` resolved explicitly per the
+trap above, and the binary relocated per §4:
 
 ```dockerfile
 # OPENCODE_CHANNEL: "v2" (default) or "v1"
 ARG OPENCODE_CHANNEL=v2
 ARG OPENCODE_VERSION=latest
 
-RUN if [ "${OPENCODE_CHANNEL}" = "v2" ]; then INSTALL_URL=https://opencode.ai/v2/install; \
-    else INSTALL_URL=https://opencode.ai/install; fi \
-    && if [ "${OPENCODE_VERSION}" = "latest" ]; then \
-         su - node -c "curl -fsSL ${INSTALL_URL} | bash"; \
-       else \
-         su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --version ${OPENCODE_VERSION}"; \
-       fi \
-    && ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode
+RUN set -eu; \
+    if [ "${OPENCODE_CHANNEL}" = "v2" ]; then \
+      INSTALL_URL=https://opencode.ai/v2/install; \
+      CHANNEL_URL=https://opencode.ai/update/api/latest/cli/npm; \
+    else \
+      INSTALL_URL=https://opencode.ai/install; \
+      CHANNEL_URL=; \
+    fi; \
+    VERSION="${OPENCODE_VERSION}"; \
+    if [ "${VERSION}" = "latest" ] && [ -n "${CHANNEL_URL}" ]; then \
+      VERSION=$(curl -fsSL "${CHANNEL_URL}" | jq -r .version); \
+    fi; \
+    echo "Installing opencode ${VERSION} from ${INSTALL_URL}"; \
+    if [ "${VERSION}" = "latest" ]; then \
+      su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --no-modify-path"; \
+    else \
+      su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --no-modify-path --version ${VERSION}"; \
+    fi; \
+    mkdir -p /opt/opencode/bin; \
+    mv /home/node/.opencode/bin/opencode /opt/opencode/bin/opencode; \
+    rm -rf /home/node/.opencode; \
+    ln -sf /opt/opencode/bin/opencode /usr/local/bin/opencode
+
+ENV OPENCODE_DISABLE_AUTOUPDATE=1
 ```
 
-Consider also `ENV OPENCODE_DISABLE_AUTOUPDATE=1` so a pinned image does not silently
-replace its own binary on first run.
+`OPENCODE_DISABLE_AUTOUPDATE=1` keeps a pinned image from silently replacing its own
+binary on first run — which matters more now that the binary sits in `/opt` and the
+update path would write somewhere else entirely.
 
 ---
 
 ## 2. Firewall / allowed domains
 
-The install path is *better* under V2: it now needs only `opencode.ai` and
+The install path is *better* under V2: it needs only `opencode.ai` and
 `registry.npmjs.org`, both already allowlisted. `github.com` / `api.github.com` are no
-longer required for installing OpenCode (they are still needed for `gh` and git).
+longer required to install OpenCode (still needed for `gh` and git).
 
-**Gap found — `models.opencode.ai` is blocked.** The binary fetches its model catalog
-from `https://models.opencode.ai/api.json`. `init-firewall.sh` resolves exact hostnames
-only (no wildcards), and the two hosts do not share IPs *(verified)*:
+Nothing here is *required*. Blocking model endpoints by default is the point of the
+firewall — whether prompts and code leave the container is the user's call, which is why
+the provider APIs in `allowed-domains.conf` ship commented out. Both items below follow
+that pattern: a comment, not an allow.
+
+### 2a. `models.opencode.ai` — opt-in, and metadata only
+
+`init-firewall.sh` resolves exact hostnames (no wildcards), and this host shares no IPs
+with `opencode.ai` *(verified)*, so it is blocked today:
 
 ```
 opencode.ai        -> 172.65.90.20 .21 .22 .23
 models.opencode.ai -> 172.66.173.149 104.20.32.17
 ```
 
-This is **not new in V2** — v1.18 references the same host — so the current `opencode`
-variant is already running with a blocked model catalog whenever the firewall is on.
+Worth documenting accurately, because it is **not** an inference endpoint. It serves one
+~4.7 MB public catalog, `https://models.opencode.ai/api.json`, listing providers and
+their models — id, display name, credential env var names, base URL, context limits,
+pricing *(verified by fetching it)*. A one-way GET of a public file; no code or prompts
+are sent.
 
-Add to `allowed-domains.conf`:
+**Blocked, OpenCode still works** *(verified)*: `opencode models` with the fetch disabled
+still lists the built-in `opencode/*` models. What is lost is metadata for third-party
+providers — names, context limits and pricing in the model picker. The catalog is cached
+in `opencode.db` once fetched, so allowing it for a single run and re-blocking also works.
+
+Suggested `allowed-domains.conf` entry — commented, with the tradeoff stated:
 
 ```
+# OpenCode model catalog (metadata only: provider/model names, limits, pricing).
+# ~4.7MB public JSON, one-way GET - no code or prompts are sent.
+# Left blocked by default; without it third-party models show no metadata.
+# Set OPENCODE_DISABLE_MODELS_FETCH=1 to skip the request entirely.
+# models.opencode.ai
+```
+
+### 2b. `opencode.ai` is *also* the Zen inference endpoint
+
+This one cuts against the default posture and is worth knowing. `opencode.ai` is
+allowlisted (uncommented) today because the installer needs it — but the built-in free
+models advertised on first run route inference through **`https://opencode.ai/zen/v1`**
+*(verified in the catalog: provider id `opencode`, "OpenCode Zen")*.
+
+So with the stock config the free models work out of the box, and **prompts do leave the
+container** — via the same host on which the harmless metadata catalog is blocked.
+
+Removing it is possible, with a real cost:
+
+- **Installing is build-time, not runtime.** The binary is baked into the image, so the
+  runtime firewall does not need `opencode.ai` for the container to function.
+- **But** `opencode.ai` also serves `/oauth/opencode/client.json`, used by the OAuth
+  provider flows behind `/connect`. Block it and provider login is API-key only.
+- `opencode upgrade` and the config/theme schema fetches also stop working. Neither
+  matters much in a rebuild-the-image workflow.
+
+Suggested treatment — keep it allowed (the least surprising default) and state what it
+implies:
+
+```
+# OpenCode. Needed at build time to install the CLI, and at runtime for OAuth
+# provider login (/connect) and `opencode upgrade`.
+# NOTE: this host is ALSO the OpenCode Zen inference endpoint (opencode.ai/zen/v1)
+# used by the built-in free models - so leaving it allowed means prompts can leave the
+# container. Comment it out for an inference-free sandbox; provider login is then
+# API-key only.
 opencode.ai
-models.opencode.ai
 ```
 
-Other hosts referenced by the V2 binary (`opencode.ai/config.json`, `/theme.json`,
-`/v2/cli.json`, `/oauth/opencode/client.json`, `/update/api/…`) are all on `opencode.ai`
-and already covered. The provider API list in the config file needs no change — it is
-still "uncomment the providers you use".
+Other hosts the V2 binary references (`opencode.ai/config.json`, `/theme.json`,
+`/v2/cli.json`, `/update/api/…`) are all on `opencode.ai` and covered by the above.
+
+### 2c. Remote MCP servers
+
+Each remote MCP server needs **its own host** added to `allowed-domains.conf` — see §6c.
+This is the most likely "MCP worked on my host but not in the container" failure.
 
 No firewall change is needed for the new background service: it binds
 `127.0.0.1:<random>` and `init-firewall.sh` already accepts `-o lo`.
@@ -133,21 +252,21 @@ http://127.0.0.1:49374
 - Subcommands: `service start | stop | restart | status | get | set | unset`.
 - Bypass with `--standalone` (private per-process server) or `--server <url>`.
 - The service records `{id, version, url, pid, password}` in
-  `~/.local/state/opencode/service.json` (removed on stop).
-- The shared secret lives in **`~/.config/opencode/service.json`**, is generated on first
-  start and then **reused** across restarts *(verified)*.
+`~/.local/state/opencode/service.json` (removed on stop).
+- The shared secret lives in `**~/.config/opencode/service.json**`, is generated on first
+start and then **reused** across restarts *(verified)*.
 
 **Container implications:**
 
 - Inside a single container this is fine — loopback only, no port to publish.
 - `~/.local/state/opencode` should stay **unmounted** so each container gets its own
-  service record. The current mounts already do this correctly.
+service record. The current mounts already do this correctly.
 - `~/.config/opencode` *is* bind-mounted from the host, so the host's service password is
-  shared into the container. Not a functional break (the password is reused, not
-  regenerated), but it means a host secret now crosses the sandbox boundary — worth a
-  README note for anyone using this container as a security boundary.
+shared into the container. Not a functional break (the password is reused, not
+regenerated), but it means a host secret now crosses the sandbox boundary — worth a
+README note for anyone using this container as a security boundary.
 - For CI-style non-interactive use, prefer `opencode run --standalone …` to avoid leaving
-  a daemon behind.
+a daemon behind.
 
 ---
 
@@ -155,17 +274,19 @@ http://127.0.0.1:49374
 
 `opencode debug paths` on V2 *(verified)*:
 
-| Selector | Path |
-|---|---|
+
+| Selector | Path                                                         |
+| -------- | ------------------------------------------------------------ |
 | `config` | `~/.config/opencode` (overridable via `OPENCODE_CONFIG_DIR`) |
-| `data`   | `~/.local/share/opencode` |
-| `state`  | `~/.local/state/opencode` |
-| `cache`  | `~/.cache/opencode` |
-| `bin`    | `~/.cache/opencode/bin` |
-| `log`    | `~/.local/share/opencode/log` |
-| `repos`  | `~/.local/share/opencode/repos` |
-| `db`     | `~/.local/share/opencode/opencode.db` |
-| `tmp`    | `/tmp/opencode` |
+| `data`   | `~/.local/share/opencode`                                    |
+| `state`  | `~/.local/state/opencode`                                    |
+| `cache`  | `~/.cache/opencode`                                          |
+| `bin`    | `~/.cache/opencode/bin`                                      |
+| `log`    | `~/.local/share/opencode/log`                                |
+| `repos`  | `~/.local/share/opencode/repos`                              |
+| `db`     | `~/.local/share/opencode/opencode.db`                        |
+| `tmp`    | `/tmp/opencode`                                              |
+
 
 The XDG locations are unchanged from v1.18, so the existing mounts still point at the
 right places. The problem is *what now lives there*.
@@ -242,7 +363,7 @@ RUN mkdir -p /home/node/.config /home/node/.local/share \
  && chown -R node:node /home/node
 ```
 
-The four subdirectories must be created by **`entrypoint-opencode.sh`**, not the
+The four subdirectories must be created by `**entrypoint-opencode.sh**`, not the
 Dockerfile: `/home/node/.opencode` is a mount point, so anything the image puts there is
 shadowed the moment the bind mount lands. The symlinks are deliberately left dangling in
 the image and resolve on first start:
@@ -273,26 +394,24 @@ symlinks and neither notices nor cares.
 #### Two image changes this requires
 
 1. **Move the binary out of `/home/node/.opencode/bin`.** The installer hardcodes
-   `INSTALL_DIR=$HOME/.opencode/bin` (both v1 and v2 — there is no `OPENCODE_INSTALL_DIR`
-   override, despite what some third-party install guides claim). Mounting the host folder
-   over it would replace the container's Linux binary with whatever the host has there —
-   on a macOS host, a Darwin binary. Install, then relocate:
-
-   ```dockerfile
+ `INSTALL_DIR=$HOME/.opencode/bin` (both v1 and v2 — there is no `OPENCODE_INSTALL_DIR`
+ override, despite what some third-party install guides claim). Mounting the host folder
+ over it would replace the container's Linux binary with whatever the host has there —
+ on a macOS host, a Darwin binary. Install, then relocate:
+  ```dockerfile
    RUN su - node -c "curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path" \
     && mkdir -p /opt/opencode/bin \
     && mv /home/node/.opencode/bin/opencode /opt/opencode/bin/opencode \
     && rm -rf /home/node/.opencode \
     && ln -sf /opt/opencode/bin/opencode /usr/local/bin/opencode
-   ```
+  ```
 
    *(Verified: the v2 binary runs correctly from an arbitrary path.)*
-
 2. **Pass `--no-modify-path`.** The installer appends
-   `export PATH=$INSTALL_DIR:$PATH` to `.zshrc`, which currently puts
-   `/home/node/.opencode/bin` **first** on PATH *(verified — it is in the image's `.zshrc`
-   today)*. With the host folder mounted there, a stale or foreign host binary would
-   shadow `/usr/local/bin/opencode` in every interactive shell.
+ `export PATH=$INSTALL_DIR:$PATH` to `.zshrc`, which currently puts
+ `/home/node/.opencode/bin` **first** on PATH *(verified — it is in the image's `.zshrc`
+ today)*. With the host folder mounted there, a stale or foreign host binary would
+ shadow `/usr/local/bin/opencode` in every interactive shell.
 
 #### Why not environment variables
 
@@ -311,10 +430,10 @@ documenting as an escape hatch, but it does not move the database.
 - **One folder to keep track of**, named the same as the tool, next to `~/.claude`.
 - **Survives `docker system prune` and container rebuilds** — it is a host directory.
 - **Copy/move-able** — `rsync` `~/.opencode` to another VM and sessions, credentials and
-  config all come with it. The project folder stays a separate mount, so code and history
-  move independently.
+config all come with it. The project folder stays a separate mount, so code and history
+move independently.
 - **The host's `~/.local/share/opencode` is never touched**, so a host v1 install keeps
-  working and stays rollback-able — which is the whole point of §4b.
+working and stays rollback-able — which is the whole point of §4b.
 
 If the host already has OpenCode installed, its own binary is sitting in `~/.opencode/bin`
 already. The container ignores it (that is what change 1 and 2 above are for), and it is
@@ -323,10 +442,10 @@ arguably where it belongs: one folder, everything OpenCode.
 Remaining caveats, to document rather than engineer around:
 
 - Running **two containers at once** against the same `~/.opencode` means two writers on
-  one SQLite database. Give each its own folder, or accept single-container use.
+one SQLite database. Give each its own folder, or accept single-container use.
 - On **Docker Desktop for macOS/Windows**, SQLite WAL shared memory over virtiofs /
-  gRPC-FUSE bind mounts is unreliable. On a Linux VM this is a non-issue; if it does bite,
-  `OPENCODE_DB` can move just the database file off the bind mount.
+gRPC-FUSE bind mounts is unreliable. On a Linux VM this is a non-issue; if it does bite,
+`OPENCODE_DB` can move just the database file off the bind mount.
 
 ## 5. CLI surface changes *(verified by `--help` diff)*
 
@@ -349,8 +468,8 @@ flags `--pure`, `--port`, `--hostname`, `--mdns`, `--mdns-domain`, `--cors`,
 
 **Impact on this repo:** none of the removed commands appear in the Dockerfile,
 entrypoints, or CI. The `opencode --version` CI check still passes (output string changes
-from `1.18.30` to `opencode v2.0.1`, which nothing parses). The version line in
-`entrypoint-opencode.sh` will print `opencode v2.0.1` — cosmetic only.
+from `1.18.30` to `opencode v2.0.3`, which nothing parses). The version line in
+`entrypoint-opencode.sh` will print `opencode v2.0.3` — cosmetic only.
 
 ---
 
@@ -403,7 +522,7 @@ places: `settings` (options handed to the runtime package), `headers` (HTTP head
 }
 ```
 
-Note the **`aisdk:` prefix** on AI SDK packages. Native V2 packages use their own path,
+Note the `**aisdk:` prefix** on AI SDK packages. Native V2 packages use their own path,
 e.g. `"package": "@opencode/ai/providers/openai-compatible"`.
 
 Full V2 provider field set: `name`, `env` (ordered env var names that can supply the
@@ -430,10 +549,12 @@ ID), `settings`, `headers`, `body`, `models`, `transport` (`"http"` | `"websocke
 
 **Provider IDs consolidated** — rename these or the provider silently stops resolving:
 
-| V1 provider ID | V2 |
-|---|---|
-| `azure-cognitive-services` | `azure` |
-| `google-vertex-anthropic` | `google-vertex` |
+
+| V1 provider ID             | V2              |
+| -------------------------- | --------------- |
+| `azure-cognitive-services` | `azure`         |
+| `google-vertex-anthropic`  | `google-vertex` |
+
 
 **Dropped provider fields (ignored in V2):** `id`, `whitelist`, `blacklist`.
 
@@ -441,14 +562,16 @@ ID), `settings`, `headers`, `body`, `models`, `transport` (`"http"` | `"websocke
 
 Per-model renames:
 
-| V1 | V2 |
-|---|---|
-| `id` | `modelID` |
-| `tool_call` | `capabilities.tools` |
+
+| V1                             | V2                                           |
+| ------------------------------ | -------------------------------------------- |
+| `id`                           | `modelID`                                    |
+| `tool_call`                    | `capabilities.tools`                         |
 | `modalities.input` / `.output` | `capabilities.input` / `capabilities.output` |
-| `cache_read` / `cache_write` | `cost.cache.read` / `cost.cache.write` |
-| `status: "deprecated"` | `disabled: true` |
-| `variants: { … }` (object) | `variants: [ … ]` (array, each with an `id`) |
+| `cache_read` / `cache_write`   | `cost.cache.read` / `cost.cache.write`       |
+| `status: "deprecated"`         | `disabled: true`                             |
+| `variants: { … }` (object)     | `variants: [ … ]` (array, each with an `id`) |
+
 
 ```jsonc
 // V1
@@ -504,7 +627,7 @@ syntax is `provider/model#variant`. A separate `variant` key is no longer read.
 
 ### 6c. MCP servers *(the other externally-used one)*
 
-Servers move down one level under **`mcp.servers`**, `enabled` inverts to **`disabled`**,
+Servers move down one level under `**mcp.servers**`, `enabled` inverts to `**disabled**`,
 and the scalar `timeout` becomes an object with distinct phases.
 
 ```jsonc
@@ -597,14 +720,14 @@ OAuth keys go snake_case: `clientId` → `client_id`, `clientSecret` → `client
 **Container-specific MCP notes:**
 
 - A `local` server running `npx …` needs `registry.npmjs.org` through the firewall —
-  already allowlisted.
+already allowlisted.
 - A `remote` server needs **its own host added to `allowed-domains.conf`**
-  (`mcp.context7.com` in the example above). This is the most likely "MCP worked on my
-  host, not in the container" failure.
+(`mcp.context7.com` in the example above). This is the most likely "MCP worked on my
+host, not in the container" failure.
 - `oauth.callback_port` binds a **loopback** listener inside the container; loopback is
-  already accepted by `init-firewall.sh`, but the browser step of an OAuth flow has no
-  browser in a headless container — prefer `headers` with an API key, or `oauth: false`,
-  for MCP servers used from inside the sandbox.
+already accepted by `init-firewall.sh`, but the browser step of an OAuth flow has no
+browser in a headless container — prefer `headers` with an API key, or `oauth: false`,
+for MCP servers used from inside the sandbox.
 
 ### 6d. Permissions
 
@@ -627,16 +750,18 @@ first matching rule wins.
 
 Singular → plural, and a few renames:
 
-| V1 | V2 |
-|---|---|
-| `agent` | `agents` |
-| `command` | `commands` |
-| `plugin` | `plugins` |
-| `snapshot` | `snapshots` |
-| `attachment` | `media` |
-| `reference` | `references` |
-| `autoshare` | `share: "auto" \| "manual" \| "disabled"` |
-| `mode` | primary agents in `agents` (add `mode: primary` to frontmatter) |
+
+| V1           | V2                                                              |
+| ------------ | --------------------------------------------------------------- |
+| `agent`      | `agents`                                                        |
+| `command`    | `commands`                                                      |
+| `plugin`     | `plugins`                                                       |
+| `snapshot`   | `snapshots`                                                     |
+| `attachment` | `media`                                                         |
+| `reference`  | `references`                                                    |
+| `autoshare`  | `share: "auto" | "manual" | "disabled"`                         |
+| `mode`       | primary agents in `agents` (add `mode: primary` to frontmatter) |
+
 
 **Agents:** `prompt` → `system`, `disable` → `disabled`, `maxSteps` → `steps`,
 `permission` → `permissions` (array form above), `temperature` / `top_p` and other
@@ -674,7 +799,7 @@ still resolve.
 
 ## 7. Skills — no change needed *(confirmed in the V2 docs)*
 
-V2 still auto-discovers, globally: `~/.config/opencode/skills`, **`~/.claude/skills`**,
+V2 still auto-discovers, globally: `~/.config/opencode/skills`, `**~/.claude/skills**`,
 `~/.agents/skills`; and per project: `.opencode/skills`, `.claude/skills`,
 `.agents/skills`.
 
@@ -688,52 +813,54 @@ it keeps working under V2 with no Dockerfile change. The README's claim at line 
 
 Worth adding to `.env.example` / the README:
 
-| Variable | Use |
-|---|---|
-| `OPENCODE_CONFIG_DIR` | Override the config directory |
-| `OPENCODE_CONFIG` | Point at a specific config file |
-| `OPENCODE_CONFIG_CONTENT` | Inline config JSON (handy for CI) |
-| `OPENCODE_DB` | Override the SQLite path (`:memory:` supported) |
-| `OPENCODE_LOG_LEVEL` | Replaces the removed `logLevel` config field |
-| `OPENCODE_DISABLE_AUTOUPDATE` | Keep a pinned image from replacing its binary |
-| `OPENCODE_DISABLE_MODELS_FETCH` / `OPENCODE_MODELS_URL` | Offline or mirrored model catalog |
-| `OPENCODE_SERVER_PASSWORD` / `OPENCODE_PASSWORD` | Supply the service secret explicitly |
-| `OPENCODE_API_KEY` | Non-interactive credential |
-| `OPENCODE_DISABLE_PROJECT_CONFIG` | Ignore in-repo config (useful for untrusted workspaces) |
+
+| Variable                                                | Use                                                     |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| `OPENCODE_CONFIG_DIR`                                   | Override the config directory                           |
+| `OPENCODE_CONFIG`                                       | Point at a specific config file                         |
+| `OPENCODE_CONFIG_CONTENT`                               | Inline config JSON (handy for CI)                       |
+| `OPENCODE_DB`                                           | Override the SQLite path (`:memory:` supported)         |
+| `OPENCODE_LOG_LEVEL`                                    | Replaces the removed `logLevel` config field            |
+| `OPENCODE_DISABLE_AUTOUPDATE`                           | Keep a pinned image from replacing its binary           |
+| `OPENCODE_DISABLE_MODELS_FETCH` / `OPENCODE_MODELS_URL` | Offline or mirrored model catalog                       |
+| `OPENCODE_SERVER_PASSWORD` / `OPENCODE_PASSWORD`        | Supply the service secret explicitly                    |
+| `OPENCODE_API_KEY`                                      | Non-interactive credential                              |
+| `OPENCODE_DISABLE_PROJECT_CONFIG`                       | Ignore in-repo config (useful for untrusted workspaces) |
+
 
 ---
 
 ## 9. Proposed work plan
 
 1. **Dockerfile** — add `OPENCODE_CHANNEL` build arg, default `v2`, switching the install
-   URL. Optionally set `OPENCODE_DISABLE_AUTOUPDATE=1`.
-2. **`allowed-domains.conf`** — add `models.opencode.ai` (fixes v1 too).
+ URL. Optionally set `OPENCODE_DISABLE_AUTOUPDATE=1`.
+2. `**allowed-domains.conf**` — add `models.opencode.ai` (fixes v1 too).
 3. **Mounts + image layout** — consolidate onto a single `${HOME}/.opencode` bind mount
-   in `docker-compose.yml`, `devcontainer-opencode.json` and
-   `devcontainer-opencode-dind.json`; in the `Dockerfile`, symlink the four XDG
-   directories into it, relocate the binary to `/opt/opencode/bin`, and install with
-   `--no-modify-path`. See §4.
-4. **`entrypoint-opencode.sh`** — add a short V2 hint block: `/connect` to add a provider,
-   `opencode service status`, and `--standalone` for scripted runs.
+ in `docker-compose.yml`, `devcontainer-opencode.json` and
+ `devcontainer-opencode-dind.json`; in the `Dockerfile`, symlink the four XDG
+ directories into it, relocate the binary to `/opt/opencode/bin`, and install with
+ `--no-modify-path`. See §4.
+4. `**entrypoint-opencode.sh**` — add a short V2 hint block: `/connect` to add a provider,
+ `opencode service status`, and `--standalone` for scripted runs.
 5. **CI (`build.yml`)** — extend the OpenCode step beyond `--version`:
-   `opencode debug paths`, then `opencode service start && opencode service status &&
-   opencode service stop`. Runs offline, catches a broken service/DB bootstrap.
+ `opencode debug paths`, then `opencode service start && opencode service status &&  opencode service stop`. Runs offline, catches a broken service/DB bootstrap.
 6. **README** — update the OpenCode variant section: V2 by default, how to pin V1
-   (`OPENCODE_CHANNEL=v1 OPENCODE_VERSION=1.18.30`), the credentials-are-in-the-database
-   change, the migration-in-place warning, and a link to the official migration guide.
+ (`OPENCODE_CHANNEL=v1 OPENCODE_VERSION=1.18.30`), the credentials-are-in-the-database
+ change, the migration-in-place warning, and a link to the official migration guide.
 
 ### Open questions for the maintainer
 
 - **Keep a V1 variant?** The build arg above makes it a one-line opt-in without doubling
-  the CI matrix. Alternatively drop V1 entirely once V2 is confirmed working.
-- **Pin the version?** `OPENCODE_VERSION=latest` on the v2 channel currently resolves via
-  a `beta`-named metadata endpoint. Pinning (e.g. `2.0.1`) would make weekly scheduled
-  builds reproducible, at the cost of manual bumps.
+the CI matrix. Alternatively drop V1 entirely once V2 is confirmed working.
+- **Pin the version?** Given the channel trap above, `latest` must at minimum be
+  resolved through `update/api/latest`. Whether to go further and pin an exact version
+  (e.g. `2.0.3`) in the Dockerfile is a separate call — it makes the weekly scheduled
+  build fully reproducible at the cost of manual bumps.
 - **First-run migration for existing users.** Anyone already using the `opencode`
-  variant has state in `~/.config/opencode` and `~/.local/share/opencode`. Worth a
-  README one-liner (`mkdir -p ~/.opencode/{config,data} && cp -a ~/.config/opencode/.
-  ~/.opencode/config/ && cp -a ~/.local/share/opencode/. ~/.opencode/data/`), or should
-  the entrypoint detect and offer it?
-- **`cli.json` migration touches the host config.** The first V2 start rewrites
-  `tui.json` → `cli.json` inside the bind-mounted config dir. Acceptable, or should the
-  README tell users to back up `~/.config/opencode` before the first V2 run?
+variant has state in `~/.config/opencode` and `~/.local/share/opencode`. Worth a
+README one-liner (`mkdir -p ~/.opencode/{config,data} && cp -a ~/.config/opencode/. ~/.opencode/config/ && cp -a ~/.local/share/opencode/. ~/.opencode/data/`), or should
+the entrypoint detect and offer it?
+- `**cli.json` migration touches the host config.** The first V2 start rewrites
+`tui.json` → `cli.json` inside the bind-mounted config dir. Acceptable, or should the
+README tell users to back up `~/.config/opencode` before the first V2 run?
+
