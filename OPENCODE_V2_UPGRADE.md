@@ -20,7 +20,7 @@ The container itself needs **four small changes** plus **one mount-strategy deci
 |---|--------|-------|----------|
 | 1 | Install URL `opencode.ai/install` → `opencode.ai/v2/install` | `Dockerfile` (opencode stage) | Required |
 | 2 | Allow `models.opencode.ai` through the firewall | `allowed-domains.conf` | Required (already broken for v1) |
-| 3 | Point the data bind mount at a **dedicated** host dir, not the one v1 uses | `docker-compose.yml`, `devcontainer-opencode*.json` | **Required — data-loss risk** |
+| 3 | Consolidate state into one `~/.opencode` bind mount (matches `~/.claude`) | `Dockerfile`, `docker-compose.yml`, `devcontainer-opencode*.json` | **Required — data-loss risk** |
 | 4 | Document the new background-service model and `/connect` auth | `README.md`, `entrypoint-opencode.sh` | Recommended |
 
 Everything else in the image keeps working unchanged: install directory, the
@@ -200,58 +200,133 @@ concurrently is unsafe, and WAL shared-memory is unreliable over Docker Desktop'
 virtiofs/gRPC-FUSE bind mounts on macOS and Windows. V2's always-on background service
 makes concurrent access the normal case rather than the exception.
 
-### Recommendation — keep the bind mount, change the path
+### Recommendation — one `~/.opencode` folder, bind-mounted
 
-A bind mount is the right call here and should stay: it survives `docker system prune`,
-and it moves with the workspace when the whole VM is rebuilt or migrated, which a named
-volume does not. The problem is not the mount *type*, it is that the container and a host
-v1 install are aimed at the **same directory and the same file name**.
+The bind mount stays. The problem is not the mount *type*, it is that OpenCode's state is
+scattered across four XDG directories and one of them collides, file-for-file, with a host
+v1 install.
 
-So: keep bind-mounting, but give the container its **own** data directory.
+The Claude Code variants already do this the right way — one folder, one mount:
+
+```yaml
+- ${HOME}/.claude:/home/node/.claude:cached      # docker-compose.yml, claude service
+```
+
+The OpenCode variant never followed that convention; it went straight to the XDG split
+when it was added in `63caa64`. V2 is a good moment to fix it.
+
+**Target: one host folder holding everything OpenCode, mounted at one path.**
 
 ```yaml
 # docker-compose.yml — opencode and opencode-dind
 volumes:
-  - ${HOME}/.config/opencode:/home/node/.config/opencode:cached                       # unchanged
-  - ${OPENCODE_DATA_DIR:-${HOME}/.local/share/opencode-container}:/home/node/.local/share/opencode:cached
+  - ${HOME}/.opencode:/home/node/.opencode:cached
 ```
 
 ```jsonc
 // devcontainer-opencode*.json
 "mounts": [
-  "source=${localEnv:HOME}/.config/opencode,target=/home/node/.config/opencode,type=bind,consistency=cached",
-  "source=${localEnv:HOME}/.local/share/opencode-container,target=/home/node/.local/share/opencode,type=bind,consistency=cached"
+  "source=${localEnv:HOME}/.opencode,target=/home/node/.opencode,type=bind,consistency=cached"
 ]
 ```
 
-This keeps every property that made the bind mount attractive:
+Inside the image, the four XDG locations become symlinks into that one folder:
 
-- **Survives `docker system prune`** — it is a host directory, not a volume.
-- **Moves between VMs** — `rsync` the host directory and session history comes along.
-- **Backed up by whatever already backs up `$HOME`.**
+```dockerfile
+RUN mkdir -p /home/node/.config /home/node/.local/share \
+             /home/node/.local/state /home/node/.cache \
+ && ln -s /home/node/.opencode/config /home/node/.config/opencode \
+ && ln -s /home/node/.opencode/data   /home/node/.local/share/opencode \
+ && ln -s /home/node/.opencode/state  /home/node/.local/state/opencode \
+ && ln -s /home/node/.opencode/cache  /home/node/.cache/opencode \
+ && chown -R node:node /home/node
+```
 
-…while removing the hazard:
+The four subdirectories must be created by **`entrypoint-opencode.sh`**, not the
+Dockerfile: `/home/node/.opencode` is a mount point, so anything the image puts there is
+shadowed the moment the bind mount lands. The symlinks are deliberately left dangling in
+the image and resolve on first start:
 
-- **No in-place migration of a v1 database.** The host's `~/.local/share/opencode` is
-  left alone, so a host v1 install keeps working and can be rolled back to.
-- **One writer.** The container's v2 service is the only process on that DB.
+```bash
+mkdir -p /home/node/.opencode/{config,data,state,cache}
+```
 
-The config directory **stays external and bind-mounted as-is** — `opencode.json`, agents,
-commands, skills and the service password keep coming from the host, which is the point
-of the variant.
+On a first run this also means a brand-new `~/.opencode` on the host gets populated
+automatically — no setup step for the user.
 
-Caveats to document rather than engineer around:
+**Verified** — with those symlinks in place, starting the service and running `auth list`
+puts everything in the one folder:
 
-- Running **two containers at once** against the same `OPENCODE_DATA_DIR` reintroduces
-  concurrent SQLite access. Give each its own directory, or accept single-container use.
+```
+~/.opencode/config/service.json
+~/.opencode/data/opencode.db
+~/.opencode/data/log/opencode.log
+~/.opencode/data/repos/
+~/.opencode/data/shell/
+~/.opencode/cache/bin/
+~/.opencode/state/
+```
+
+`opencode debug paths` still reports the standard XDG paths — it resolves them through the
+symlinks and neither notices nor cares.
+
+#### Two image changes this requires
+
+1. **Move the binary out of `/home/node/.opencode/bin`.** The installer hardcodes
+   `INSTALL_DIR=$HOME/.opencode/bin` (both v1 and v2 — there is no `OPENCODE_INSTALL_DIR`
+   override, despite what some third-party install guides claim). Mounting the host folder
+   over it would replace the container's Linux binary with whatever the host has there —
+   on a macOS host, a Darwin binary. Install, then relocate:
+
+   ```dockerfile
+   RUN su - node -c "curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path" \
+    && mkdir -p /opt/opencode/bin \
+    && mv /home/node/.opencode/bin/opencode /opt/opencode/bin/opencode \
+    && rm -rf /home/node/.opencode \
+    && ln -sf /opt/opencode/bin/opencode /usr/local/bin/opencode
+   ```
+
+   *(Verified: the v2 binary runs correctly from an arbitrary path.)*
+
+2. **Pass `--no-modify-path`.** The installer appends
+   `export PATH=$INSTALL_DIR:$PATH` to `.zshrc`, which currently puts
+   `/home/node/.opencode/bin` **first** on PATH *(verified — it is in the image's `.zshrc`
+   today)*. With the host folder mounted there, a stale or foreign host binary would
+   shadow `/usr/local/bin/opencode` in every interactive shell.
+
+#### Why not environment variables
+
+Pointing all four `XDG_*_HOME` vars at a single root does collapse the paths — *verified*,
+`debug paths` then reports one directory for config, data, state and cache. It was rejected
+anyway: OpenCode spawns shell commands and MCP servers that **inherit its environment**, so
+a container-wide (or even wrapper-scoped) `XDG_CONFIG_HOME` would also relocate `gh`, whose
+config the image deliberately places at `~/.config/gh`. Symlinks keep the redirection where
+it belongs — on OpenCode's directories only.
+
+`OPENCODE_CONFIG_DIR` redirects the config directory alone *(verified)* and is still worth
+documenting as an escape hatch, but it does not move the database.
+
+#### What this gives you
+
+- **One folder to keep track of**, named the same as the tool, next to `~/.claude`.
+- **Survives `docker system prune` and container rebuilds** — it is a host directory.
+- **Copy/move-able** — `rsync` `~/.opencode` to another VM and sessions, credentials and
+  config all come with it. The project folder stays a separate mount, so code and history
+  move independently.
+- **The host's `~/.local/share/opencode` is never touched**, so a host v1 install keeps
+  working and stays rollback-able — which is the whole point of §4b.
+
+If the host already has OpenCode installed, its own binary is sitting in `~/.opencode/bin`
+already. The container ignores it (that is what change 1 and 2 above are for), and it is
+arguably where it belongs: one folder, everything OpenCode.
+
+Remaining caveats, to document rather than engineer around:
+
+- Running **two containers at once** against the same `~/.opencode` means two writers on
+  one SQLite database. Give each its own folder, or accept single-container use.
 - On **Docker Desktop for macOS/Windows**, SQLite WAL shared memory over virtiofs /
-  gRPC-FUSE bind mounts is unreliable. On a Linux VM (the usual setup here) this is a
-  non-issue. If it does bite, `OPENCODE_DB` can move just the database onto a container
-  path while the rest of the data dir stays on the bind mount.
-
-If a user genuinely wants the container to inherit host credentials and history, the
-recipe is a one-time `cp -a ~/.local/share/opencode ~/.local/share/opencode-container`
-**before** first v2 start — a copy, never a shared path.
+  gRPC-FUSE bind mounts is unreliable. On a Linux VM this is a non-issue; if it does bite,
+  `OPENCODE_DB` can move just the database file off the bind mount.
 
 ## 5. CLI surface changes *(verified by `--help` diff)*
 
@@ -633,10 +708,11 @@ Worth adding to `.env.example` / the README:
 1. **Dockerfile** — add `OPENCODE_CHANNEL` build arg, default `v2`, switching the install
    URL. Optionally set `OPENCODE_DISABLE_AUTOUPDATE=1`.
 2. **`allowed-domains.conf`** — add `models.opencode.ai` (fixes v1 too).
-3. **Mounts** — repoint the data bind mount at a dedicated host directory
-   (`${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode-container}`) in `docker-compose.yml`,
-   `devcontainer-opencode.json` and `devcontainer-opencode-dind.json`. Keep the config
-   bind mount and the bind-mount *type* — see §4.
+3. **Mounts + image layout** — consolidate onto a single `${HOME}/.opencode` bind mount
+   in `docker-compose.yml`, `devcontainer-opencode.json` and
+   `devcontainer-opencode-dind.json`; in the `Dockerfile`, symlink the four XDG
+   directories into it, relocate the binary to `/opt/opencode/bin`, and install with
+   `--no-modify-path`. See §4.
 4. **`entrypoint-opencode.sh`** — add a short V2 hint block: `/connect` to add a provider,
    `opencode service status`, and `--standalone` for scripted runs.
 5. **CI (`build.yml`)** — extend the OpenCode step beyond `--version`:
@@ -653,8 +729,11 @@ Worth adding to `.env.example` / the README:
 - **Pin the version?** `OPENCODE_VERSION=latest` on the v2 channel currently resolves via
   a `beta`-named metadata endpoint. Pinning (e.g. `2.0.1`) would make weekly scheduled
   builds reproducible, at the cost of manual bumps.
-- **Default data directory name.** `~/.local/share/opencode-container` is a guess;
-  anything that is not the path a host v1 uses works.
+- **First-run migration for existing users.** Anyone already using the `opencode`
+  variant has state in `~/.config/opencode` and `~/.local/share/opencode`. Worth a
+  README one-liner (`mkdir -p ~/.opencode/{config,data} && cp -a ~/.config/opencode/.
+  ~/.opencode/config/ && cp -a ~/.local/share/opencode/. ~/.opencode/data/`), or should
+  the entrypoint detect and offer it?
 - **`cli.json` migration touches the host config.** The first V2 start rewrites
   `tui.json` → `cli.json` inside the bind-mounted config dir. Acceptable, or should the
   README tell users to back up `~/.config/opencode` before the first V2 run?
