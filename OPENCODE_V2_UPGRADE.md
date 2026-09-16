@@ -14,14 +14,14 @@ binary or fetching the endpoint; everything else comes from the official docs.
 
 ## TL;DR
 
-The container itself needs **four small changes** plus **one mount-strategy decision**:
+The container needs **four changes**, one of which moves where OpenCode keeps its state:
 
 
 | #   | Change                                                                    | Where                                                             | Severity                         |
 | --- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------- |
 | 1   | Install URL `opencode.ai/install` → `opencode.ai/v2/install`              | `Dockerfile` (opencode stage)                                     | Required                         |
 | 2 | Document `models.opencode.ai` as a commented-out opt-in; note that `opencode.ai` is also the Zen inference endpoint | `allowed-domains.conf` | Recommended |
-| 3   | Consolidate state into one `~/.opencode` bind mount (matches `~/.claude`) | `Dockerfile`, `docker-compose.yml`, `devcontainer-opencode*.json` | **Required — data-loss risk**    |
+| 3 | Consolidate state into one `./.opencode` folder in the project | `Dockerfile`, `entrypoint-opencode.sh`, `docker-compose.yml`, `devcontainer-opencode*.json` | **Required — data-loss risk** |
 | 4   | Document the new background-service model and `/connect` auth             | `README.md`, `entrypoint-opencode.sh`                             | Recommended                      |
 
 
@@ -134,17 +134,14 @@ RUN set -eu; \
     else \
       su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --no-modify-path --version ${VERSION}"; \
     fi; \
-    mkdir -p /opt/opencode/bin; \
-    mv /home/node/.opencode/bin/opencode /opt/opencode/bin/opencode; \
-    rm -rf /home/node/.opencode; \
-    ln -sf /opt/opencode/bin/opencode /usr/local/bin/opencode
+    ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode
 
 ENV OPENCODE_DISABLE_AUTOUPDATE=1
 ```
 
-`OPENCODE_DISABLE_AUTOUPDATE=1` keeps a pinned image from silently replacing its own
-binary on first run — which matters more now that the binary sits in `/opt` and the
-update path would write somewhere else entirely.
+`OPENCODE_DISABLE_AUTOUPDATE=1` keeps a pinned image from silently replacing the binary
+the build just pinned. `--no-modify-path` suppresses the installer's `.zshrc` PATH edit
+(§4).
 
 ---
 
@@ -321,97 +318,135 @@ concurrently is unsafe, and WAL shared-memory is unreliable over Docker Desktop'
 virtiofs/gRPC-FUSE bind mounts on macOS and Windows. V2's always-on background service
 makes concurrent access the normal case rather than the exception.
 
-### Recommendation — one `~/.opencode` folder, bind-mounted
+### Recommendation — one `./.opencode` folder in the project
 
 The bind mount stays. The problem is not the mount *type*, it is that OpenCode's state is
 scattered across four XDG directories and one of them collides, file-for-file, with a host
 v1 install.
 
-The Claude Code variants already do this the right way — one folder, one mount:
+Put all four in **one `.opencode` folder inside the devcontainer project**, alongside the
+code:
 
-```yaml
-- ${HOME}/.claude:/home/node/.claude:cached      # docker-compose.yml, claude service
+```
+myproject/
+├── .opencode/          <- everything OpenCode, travels with the project
+│   ├── config/
+│   ├── data/
+│   ├── state/
+│   └── cache/
+├── src/
+└── ...
 ```
 
-The OpenCode variant never followed that convention; it went straight to the XDG split
-when it was added in `63caa64`. V2 is a good moment to fix it.
+Move or copy the project folder and the sessions, credentials and config go with it. It
+survives `docker system prune` and container rebuilds for the same reason the code does —
+it is a host directory, not a volume.
 
-**Target: one host folder holding everything OpenCode, mounted at one path.**
+**No new mount is needed.** The project is already bind-mounted at `/workspace`, so
+`./.opencode` on the host is `/workspace/.opencode` in the container. The two current
+OpenCode mounts are simply deleted:
 
 ```yaml
 # docker-compose.yml — opencode and opencode-dind
 volumes:
-  - ${HOME}/.opencode:/home/node/.opencode:cached
+  - ./:/workspace:delegated          # already there; nothing else needed
+# - ${HOME}/.config/opencode:...     <- remove
+# - ${HOME}/.local/share/opencode:... <- remove
 ```
 
-```jsonc
-// devcontainer-opencode*.json
-"mounts": [
-  "source=${localEnv:HOME}/.opencode,target=/home/node/.opencode,type=bind,consistency=cached"
-]
-```
+Same for the `mounts` arrays in `devcontainer-opencode.json` and
+`devcontainer-opencode-dind.json` — drop both OpenCode entries and keep `workspaceMount`.
 
-Inside the image, the four XDG locations become symlinks into that one folder:
+Inside the image, the four XDG locations become symlinks into that folder:
 
 ```dockerfile
 RUN mkdir -p /home/node/.config /home/node/.local/share \
              /home/node/.local/state /home/node/.cache \
- && ln -s /home/node/.opencode/config /home/node/.config/opencode \
- && ln -s /home/node/.opencode/data   /home/node/.local/share/opencode \
- && ln -s /home/node/.opencode/state  /home/node/.local/state/opencode \
- && ln -s /home/node/.opencode/cache  /home/node/.cache/opencode \
+ && ln -s /workspace/.opencode/config /home/node/.config/opencode \
+ && ln -s /workspace/.opencode/data   /home/node/.local/share/opencode \
+ && ln -s /workspace/.opencode/state  /home/node/.local/state/opencode \
+ && ln -s /workspace/.opencode/cache  /home/node/.cache/opencode \
  && chown -R node:node /home/node
 ```
 
-The four subdirectories must be created by `**entrypoint-opencode.sh**`, not the
-Dockerfile: `/home/node/.opencode` is a mount point, so anything the image puts there is
-shadowed the moment the bind mount lands. The symlinks are deliberately left dangling in
-the image and resolve on first start:
+The subdirectories are created by **`entrypoint-opencode.sh`**, not the Dockerfile —
+`/workspace` is a mount point, so anything the image writes there is shadowed the moment
+the bind mount lands. The symlinks are deliberately left dangling in the image and resolve
+on first start:
 
 ```bash
-mkdir -p /home/node/.opencode/{config,data,state,cache}
+mkdir -p /workspace/.opencode/{config,data,state,cache}
 ```
 
-On a first run this also means a brand-new `~/.opencode` on the host gets populated
-automatically — no setup step for the user.
+A project that has never run OpenCode therefore gets a working `.opencode` folder
+automatically, with no setup step.
 
-**Verified** — with those symlinks in place, starting the service and running `auth list`
-puts everything in the one folder:
+**Verified** *(against `~/.opencode`, but the mechanism is identical — only the symlink
+target differs)*: with those symlinks in place, starting the service and running
+`auth list` puts everything in the one folder:
 
 ```
-~/.opencode/config/service.json
-~/.opencode/data/opencode.db
-~/.opencode/data/log/opencode.log
-~/.opencode/data/repos/
-~/.opencode/data/shell/
-~/.opencode/cache/bin/
-~/.opencode/state/
+.opencode/config/service.json
+.opencode/data/opencode.db
+.opencode/data/log/opencode.log
+.opencode/data/repos/
+.opencode/data/shell/
+.opencode/cache/bin/
 ```
 
 `opencode debug paths` still reports the standard XDG paths — it resolves them through the
 symlinks and neither notices nor cares.
 
-#### Two image changes this requires
+#### ⚠️ This puts credentials in the project folder
 
-1. **Move the binary out of `/home/node/.opencode/bin`.** The installer hardcodes
- `INSTALL_DIR=$HOME/.opencode/bin` (both v1 and v2 — there is no `OPENCODE_INSTALL_DIR`
- override, despite what some third-party install guides claim). Mounting the host folder
- over it would replace the container's Linux binary with whatever the host has there —
- on a macOS host, a Darwin binary. Install, then relocate:
-  ```dockerfile
-   RUN su - node -c "curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path" \
-    && mkdir -p /opt/opencode/bin \
-    && mv /home/node/.opencode/bin/opencode /opt/opencode/bin/opencode \
-    && rm -rf /home/node/.opencode \
-    && ln -sf /opt/opencode/bin/opencode /usr/local/bin/opencode
-  ```
+`.opencode/data/opencode.db` holds provider credentials (§4a). It **must not** be
+committed. The project's `.gitignore` needs:
 
-   *(Verified: the v2 binary runs correctly from an arbitrary path.)*
-2. **Pass `--no-modify-path`.** The installer appends
- `export PATH=$INSTALL_DIR:$PATH` to `.zshrc`, which currently puts
- `/home/node/.opencode/bin` **first** on PATH *(verified — it is in the image's `.zshrc`
- today)*. With the host folder mounted there, a stale or foreign host binary would
- shadow `/usr/local/bin/opencode` in every interactive shell.
+```gitignore
+.opencode/config/
+.opencode/data/
+.opencode/state/
+.opencode/cache/
+```
+
+Deliberately not `.opencode/` wholesale: that same folder is where OpenCode looks for
+*project* config — `.opencode/opencode.json`, `.opencode/agents/`, `.opencode/commands/`,
+`.opencode/skills/` (§6e) — and those are meant to be committed and shared. The four
+runtime subdirectories sit beside them without colliding, but the `.gitignore` has to be
+specific.
+
+Worth having `entrypoint-opencode.sh` warn when it creates the folder in a git repo whose
+`.gitignore` does not cover it.
+
+#### What this buys, and what it costs
+
+| | |
+|---|---|
+| ✅ | One folder, named after the tool, next to the code |
+| ✅ | Moves and copies with the project — code and history stay together |
+| ✅ | Survives `docker system prune` and rebuilds |
+| ✅ | No extra mount; the two current OpenCode mounts are deleted |
+| ✅ | Host's `~/.local/share/opencode` is never touched, so a host v1 install keeps working (§4b) |
+| ⚠️ | Credentials live in the project tree — `.gitignore` is mandatory |
+| ⚠️ | Login is **per project**, not once per machine |
+
+That last one is a genuine trade. Per-project isolation is arguably the right default for
+a sandbox, but it is a change in feel from the Claude variants, which share one
+`${HOME}/.claude` across every project. If sharing one login across projects matters more,
+the same symlink scheme works unchanged against `${HOME}/.opencode` with an explicit
+bind mount — the only differences are the symlink target and that the binary then has to
+be relocated out of `/home/node/.opencode/bin`, which the installer hardcodes.
+
+#### Two image details
+
+1. **Install with `--no-modify-path`.** The installer appends
+   `export PATH=$HOME/.opencode/bin:$PATH` to `.zshrc` *(verified — it is in the image's
+   `.zshrc` today)*. Harmless with the project-relative layout, but it is noise pointing
+   at a directory nothing else uses, and it becomes actively wrong if the `${HOME}`
+   variant above is ever adopted.
+2. **The binary stays where it is.** With nothing mounted over `/home/node/.opencode`,
+   the current `ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode` keeps
+   working — no relocation needed.
 
 #### Why not environment variables
 
@@ -425,27 +460,12 @@ it belongs — on OpenCode's directories only.
 `OPENCODE_CONFIG_DIR` redirects the config directory alone *(verified)* and is still worth
 documenting as an escape hatch, but it does not move the database.
 
-#### What this gives you
+#### Remaining caveats
 
-- **One folder to keep track of**, named the same as the tool, next to `~/.claude`.
-- **Survives `docker system prune` and container rebuilds** — it is a host directory.
-- **Copy/move-able** — `rsync` `~/.opencode` to another VM and sessions, credentials and
-config all come with it. The project folder stays a separate mount, so code and history
-move independently.
-- **The host's `~/.local/share/opencode` is never touched**, so a host v1 install keeps
-working and stays rollback-able — which is the whole point of §4b.
-
-If the host already has OpenCode installed, its own binary is sitting in `~/.opencode/bin`
-already. The container ignores it (that is what change 1 and 2 above are for), and it is
-arguably where it belongs: one folder, everything OpenCode.
-
-Remaining caveats, to document rather than engineer around:
-
-- Running **two containers at once** against the same `~/.opencode` means two writers on
-one SQLite database. Give each its own folder, or accept single-container use.
+- Two containers on the same project folder means two writers on one SQLite database.
 - On **Docker Desktop for macOS/Windows**, SQLite WAL shared memory over virtiofs /
-gRPC-FUSE bind mounts is unreliable. On a Linux VM this is a non-issue; if it does bite,
-`OPENCODE_DB` can move just the database file off the bind mount.
+  gRPC-FUSE bind mounts is unreliable. On a Linux VM this is a non-issue; if it does bite,
+  `OPENCODE_DB` can move just the database file off the bind mount.
 
 ## 5. CLI surface changes *(verified by `--help` diff)*
 
@@ -480,9 +500,9 @@ directory**, so a config that has not been migrated breaks the container exactly
 breaks the host. Config file *read locations are unchanged*:
 
 ```
-~/.config/opencode/opencode.json(c)      # global — this is what the container mounts
-<project>/opencode.json(c)
-<project>/.opencode/opencode.json(c)
+~/.config/opencode/opencode.json(c)   # global (see §4 for where this lives in the container)
+./opencode.json(c)                    # project root
+./.opencode/opencode.json(c)          # project root, inside the .opencode folder
 ```
 
 The guide's advice is that supported V1 fields and native V2 fields may coexist, so a
@@ -558,20 +578,107 @@ ID), `settings`, `headers`, `body`, `models`, `transport` (`"http"` | `"websocke
 
 **Dropped provider fields (ignored in V2):** `id`, `whitelist`, `blacklist`.
 
-### 6b. Models and variants
+### 6b. Models, limits and modalities
 
 Per-model renames:
 
-
-| V1                             | V2                                           |
-| ------------------------------ | -------------------------------------------- |
-| `id`                           | `modelID`                                    |
-| `tool_call`                    | `capabilities.tools`                         |
+| V1 | V2 |
+|---|---|
+| `id` | `modelID` |
+| `tool_call` | `capabilities.tools` |
 | `modalities.input` / `.output` | `capabilities.input` / `capabilities.output` |
-| `cache_read` / `cache_write`   | `cost.cache.read` / `cost.cache.write`       |
-| `status: "deprecated"`         | `disabled: true`                             |
-| `variants: { … }` (object)     | `variants: [ … ]` (array, each with an `id`) |
+| `cache_read` / `cache_write` | `cost.cache.read` / `cost.cache.write` |
+| `status: "deprecated"` | `disabled: true` |
+| `variants: { … }` (object) | `variants: [ … ]` (array, each with an `id`) |
+| **`limit.context` / `.input` / `.output`** | **unchanged** |
 
+**Context and output limits do not move.** `limit` keeps the same three keys in V2 —
+`context` (total window), `input` (max prompt) and `output` (max completion). If you
+worked these out for a custom provider under V1, copy the block across verbatim. Only the
+modality and tool-call flags change shape.
+
+Full before/after for a custom OpenAI-compatible provider — the case where you have to
+declare all of this by hand:
+
+```jsonc
+// V1
+{
+  "provider": {
+    "acme": {
+      "npm": "@ai-sdk/openai-compatible",
+      "api": "https://llm.example.com/v1",
+      "options": { "apiKey": "{env:ACME_API_KEY}" },
+      "models": {
+        "acme-1": {
+          "name": "Acme One",
+          "tool_call": true,
+          "modalities": { "input": ["text", "image"], "output": ["text"] },
+          "limit": { "context": 128000, "input": 120000, "output": 8192 },
+          "cost": { "input": 1.0, "output": 2.0, "cache_read": 0.1 }
+        }
+      }
+    }
+  }
+}
+
+// V2
+{
+  "providers": {
+    "acme": {
+      "name": "Acme",
+      "env": ["ACME_API_KEY"],
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": {
+        "baseURL": "https://llm.example.com/v1",
+        "apiKey": "{env:ACME_API_KEY}"
+      },
+      "models": {
+        "acme-1": {
+          "modelID": "acme-1",
+          "name": "Acme One",
+          "capabilities": {
+            "tools": true,
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "limit": { "context": 128000, "input": 120000, "output": 8192 },
+          "cost": { "input": 1.0, "output": 2.0, "cache": { "read": 0.1 } }
+        }
+      }
+    }
+  }
+}
+```
+
+Accepted modality values are `text`, `audio`, `image`, `video`, `pdf` *(read from the V2
+binary's config schema)*. `attachment: true` is gone — image support is now expressed
+solely by `image` appearing in `capabilities.input`.
+
+#### Are they strictly necessary?
+
+**For a model in the public catalog, no.** `models.opencode.ai` supplies `limit`,
+`capabilities` and `cost` for every provider/model it knows, and anything you declare
+locally is an override.
+
+**For a custom or self-hosted model, yes** — a local Ollama, vLLM or corporate gateway is
+not in the catalog, so nothing fills these in. Omit `limit` and OpenCode has no idea when
+to compact; omit `image` from `capabilities.input` and image attachments are refused.
+
+**In this container specifically, assume yes.** Per §2a the catalog host is blocked by
+default, so *no* model gets metadata from the catalog unless the user opts in. Declaring
+`limit` and `capabilities` explicitly in `opencode.json` is the reliable path here — and
+it is worth saying so in the README, since it is exactly the thing that is slow to
+diagnose: no error, just premature compaction or silently rejected attachments.
+
+#### V1 field names still work
+
+The V2 binary keeps a compatibility shim: `tool_call`, `modalities.input`/`.output` and
+`cost.cache_read`/`cache_write` are still read and folded into `capabilities` / `cost.cache`
+*(read from the V2 binary's compatibility layer — not exercised end to end, which would
+need live provider credentials)*. So an un-migrated V1 model block keeps working; the
+native V2 spelling is what new config should use.
+
+#### Variants
 
 ```jsonc
 // V1
@@ -579,33 +686,6 @@ Per-model renames:
 
 // V2
 { "variants": [ { "id": "high", "settings": { "reasoningEffort": "high" } } ] }
-```
-
-A fuller V2 model entry:
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "providers": {
-    "openai": {
-      "models": {
-        "gpt-5.2": {
-          "modelID": "gpt-5.2",
-          "name": "GPT-5.2 Coding",
-          "family": "gpt-5",
-          "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
-          "cost": {
-            "input": 3.0,
-            "output": 15.0,
-            "cache": { "read": 0.3, "write": 3.75 }
-          },
-          "limit": { "context": 128000, "input": 128000, "output": 4096 },
-          "variants": [ { "id": "batch", "body": { "service_tier": "flex" } } ]
-        }
-      }
-    }
-  }
-}
 ```
 
 Other V2 model fields: `package` (per-model runtime override), `settings`, `headers`,
@@ -832,35 +912,48 @@ Worth adding to `.env.example` / the README:
 
 ## 9. Proposed work plan
 
-1. **Dockerfile** — add `OPENCODE_CHANNEL` build arg, default `v2`, switching the install
- URL. Optionally set `OPENCODE_DISABLE_AUTOUPDATE=1`.
-2. `**allowed-domains.conf**` — add `models.opencode.ai` (fixes v1 too).
-3. **Mounts + image layout** — consolidate onto a single `${HOME}/.opencode` bind mount
- in `docker-compose.yml`, `devcontainer-opencode.json` and
- `devcontainer-opencode-dind.json`; in the `Dockerfile`, symlink the four XDG
- directories into it, relocate the binary to `/opt/opencode/bin`, and install with
- `--no-modify-path`. See §4.
-4. `**entrypoint-opencode.sh**` — add a short V2 hint block: `/connect` to add a provider,
- `opencode service status`, and `--standalone` for scripted runs.
-5. **CI (`build.yml`)** — extend the OpenCode step beyond `--version`:
- `opencode debug paths`, then `opencode service start && opencode service status &&  opencode service stop`. Runs offline, catches a broken service/DB bootstrap.
-6. **README** — update the OpenCode variant section: V2 by default, how to pin V1
- (`OPENCODE_CHANNEL=v1 OPENCODE_VERSION=1.18.30`), the credentials-are-in-the-database
- change, the migration-in-place warning, and a link to the official migration guide.
+1. **`Dockerfile`** — add an `OPENCODE_CHANNEL` build arg (default `v2`) switching the
+   install URL; resolve `latest` through `update/api/latest` rather than trusting the
+   script's stale `beta` default (§1); install with `--no-modify-path`; set
+   `OPENCODE_DISABLE_AUTOUPDATE=1`; symlink the four XDG directories into
+   `/workspace/.opencode` (§4).
+2. **`allowed-domains.conf`** — add `models.opencode.ai` as a **commented-out** entry
+   explaining what it is and what blocking it costs, and expand the `opencode.ai` comment
+   to note that it doubles as the Zen inference endpoint (§2).
+3. **Mounts** — delete both OpenCode mounts from `docker-compose.yml`,
+   `devcontainer-opencode.json` and `devcontainer-opencode-dind.json`; the existing
+   project mount already covers `./.opencode` (§4).
+4. **`entrypoint-opencode.sh`** — create `/workspace/.opencode/{config,data,state,cache}`;
+   warn when the project's `.gitignore` does not cover them; add a short V2 hint block
+   (`/connect` to add a provider, `opencode service status`, `--standalone` for scripted
+   runs).
+5. **CI (`build.yml`)** — extend the OpenCode step beyond `--version`: `opencode debug
+   paths`, then `opencode service start && opencode service status && opencode service
+   stop`. Runs offline and catches a broken service or DB bootstrap.
+6. **`README.md`** — V2 by default and how to pin V1
+   (`OPENCODE_CHANNEL=v1 OPENCODE_VERSION=1.18.30`); the `./.opencode` layout and its
+   `.gitignore` requirement; credentials now living in the database; the
+   migration-in-place warning; that custom models need explicit `limit` and
+   `capabilities` when the catalog host is blocked (§6b); and a link to the official
+   migration guide.
 
 ### Open questions for the maintainer
 
 - **Keep a V1 variant?** The build arg above makes it a one-line opt-in without doubling
-the CI matrix. Alternatively drop V1 entirely once V2 is confirmed working.
-- **Pin the version?** Given the channel trap above, `latest` must at minimum be
-  resolved through `update/api/latest`. Whether to go further and pin an exact version
-  (e.g. `2.0.3`) in the Dockerfile is a separate call — it makes the weekly scheduled
-  build fully reproducible at the cost of manual bumps.
-- **First-run migration for existing users.** Anyone already using the `opencode`
-variant has state in `~/.config/opencode` and `~/.local/share/opencode`. Worth a
-README one-liner (`mkdir -p ~/.opencode/{config,data} && cp -a ~/.config/opencode/. ~/.opencode/config/ && cp -a ~/.local/share/opencode/. ~/.opencode/data/`), or should
-the entrypoint detect and offer it?
-- `**cli.json` migration touches the host config.** The first V2 start rewrites
-`tui.json` → `cli.json` inside the bind-mounted config dir. Acceptable, or should the
-README tell users to back up `~/.config/opencode` before the first V2 run?
-
+  the CI matrix. Alternatively drop V1 entirely once V2 is confirmed working.
+- **Pin the version?** Given the channel trap in §1, `latest` must at minimum be resolved
+  through `update/api/latest`. Whether to go further and pin an exact version (e.g.
+  `2.0.3`) is a separate call — it makes the weekly scheduled build fully reproducible at
+  the cost of manual bumps.
+- **Per-project vs. per-machine login.** The `./.opencode` layout means logging in once
+  per project. Arguably the right default for a sandbox, but it differs from the Claude
+  variants' shared `${HOME}/.claude`. §4 notes the one-line change to target
+  `${HOME}/.opencode` instead if sharing one login matters more.
+- **First-run migration for existing users.** Anyone already on the `opencode` variant has
+  state in `~/.config/opencode` and `~/.local/share/opencode`. Worth a per-project README
+  one-liner (`mkdir -p .opencode/{config,data} && cp -a ~/.config/opencode/. .opencode/config/
+  && cp -a ~/.local/share/opencode/. .opencode/data/`), or should the entrypoint detect
+  and offer it?
+- **`.gitignore` ownership.** The four runtime subdirectories must be ignored, but
+  `.opencode/` also holds committable project config (§6e). Should the entrypoint offer to
+  append the four lines, or just warn?
