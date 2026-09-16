@@ -3,7 +3,8 @@
 Investigation for [#30](https://github.com/petrixh/claude-container/issues/30).
 Reference: [https://opencode.ai/v2/docs/migrate-v1/](https://opencode.ai/v2/docs/migrate-v1/)
 
-**Status:** investigation only — no container files changed yet.
+**Status:** implemented on this branch — see §9 for what landed where. Verified against a
+real `--target opencode` build, which resolved and installed **v2.0.4**.
 
 **Verified against:** OpenCode **v2.0.1** and **v2.0.3**, installed from
 `https://opencode.ai/v2/install` on linux/arm64 (glibc) and compared against the
@@ -910,7 +911,15 @@ Worth adding to `.env.example` / the README:
 
 ---
 
-## 9. Proposed work plan
+## 9. Work plan — implemented
+
+All six items have landed on this branch. Verified on a local `--target opencode` build:
+the version resolver picked up **2.0.4**, the four XDG symlinks resolve into
+`/workspace/.opencode`, `opencode debug paths` agrees, the background server starts and
+writes `opencode.db` into the state folder, the `.gitignore` warning fires only when the
+rules are missing, and the firewall allows `opencode.ai` while blocking
+`models.opencode.ai`.
+
 
 1. **`Dockerfile`** — add an `OPENCODE_CHANNEL` build arg (default `v2`) switching the
    install URL; resolve `latest` through `update/api/latest` rather than trusting the

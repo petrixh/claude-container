@@ -192,9 +192,16 @@ CMD ["/bin/zsh"]
 # ========================================
 FROM base-common AS opencode
 
-# OPENCODE_VERSION: pass "latest" (default) or a specific version like "1.14.33"
+# OPENCODE_CHANNEL: "v2" (default) or "v1". V2 and V1 ship from different
+# installer URLs; keeping this as a build arg means a V1 image is still one
+# build away. See OPENCODE_V2_UPGRADE.md.
+ARG OPENCODE_CHANNEL=v2
+# OPENCODE_VERSION: pass "latest" (default) or a specific version like "2.0.3"
 ARG OPENCODE_VERSION=latest
 ENV OPENCODE_VERSION=${OPENCODE_VERSION}
+
+# Keep a pinned image from replacing the binary this build just resolved.
+ENV OPENCODE_DISABLE_AUTOUPDATE=1
 
 USER root
 
@@ -202,12 +209,52 @@ USER root
 # Runs as `node` so the binary lands in /home/node/.opencode/bin/opencode,
 # then symlinked into /usr/local/bin for system-wide PATH availability.
 # Tar is already provided by the node:trixie base image.
-RUN if [ "${OPENCODE_VERSION}" = "latest" ]; then \
-      su - node -c "curl -fsSL https://opencode.ai/install | bash"; \
+#
+# "latest" is resolved explicitly against the update API rather than left to the
+# installer: the published V2 script hardcodes the `beta` channel, which lags the
+# real releases (it served 2.0.1 while `latest` was already 2.0.3), so trusting
+# its default silently builds an old version.
+#
+# --no-modify-path suppresses the installer's .zshrc PATH edit. The symlink in
+# /usr/local/bin is what puts opencode on PATH for every user and shell.
+RUN set -eu; \
+    if [ "${OPENCODE_CHANNEL}" = "v2" ]; then \
+      INSTALL_URL=https://opencode.ai/v2/install; \
+      CHANNEL_URL=https://opencode.ai/update/api/latest/cli/npm; \
     else \
-      su - node -c "curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION}"; \
-    fi \
-    && ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode
+      INSTALL_URL=https://opencode.ai/install; \
+      CHANNEL_URL=; \
+    fi; \
+    VERSION="${OPENCODE_VERSION}"; \
+    if [ "${VERSION}" = "latest" ] && [ -n "${CHANNEL_URL}" ]; then \
+      VERSION="$(curl -fsSL "${CHANNEL_URL}" | jq -r '.version')"; \
+      if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then \
+        echo "Failed to resolve the latest opencode version from ${CHANNEL_URL}" >&2; \
+        exit 1; \
+      fi; \
+    fi; \
+    echo "Installing opencode ${VERSION} from ${INSTALL_URL}"; \
+    if [ "${VERSION}" = "latest" ]; then \
+      su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --no-modify-path"; \
+    else \
+      su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --no-modify-path --version ${VERSION}"; \
+    fi; \
+    ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode
+
+# Consolidate OpenCode's four XDG directories into a single .opencode folder in
+# the mounted project, so sessions, credentials and config travel with the code
+# and survive `docker system prune` and container rebuilds.
+#
+# The link targets are created by the entrypoint, not here: /workspace is a mount
+# point, so anything written to it at build time is shadowed once the bind mount
+# lands. The symlinks are dangling in the image by design.
+RUN su - node -c 'set -eu; \
+      rm -rf ~/.config/opencode ~/.local/share/opencode ~/.local/state/opencode ~/.cache/opencode; \
+      mkdir -p ~/.config ~/.local/share ~/.local/state ~/.cache; \
+      ln -s /workspace/.opencode/config ~/.config/opencode; \
+      ln -s /workspace/.opencode/data   ~/.local/share/opencode; \
+      ln -s /workspace/.opencode/state  ~/.local/state/opencode; \
+      ln -s /workspace/.opencode/cache  ~/.cache/opencode'
 
 # Copy firewall, entrypoint, and helper scripts
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh

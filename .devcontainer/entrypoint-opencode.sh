@@ -4,6 +4,19 @@
 
 set -e
 
+# OpenCode's config/data/state/cache directories are symlinked to
+# ${OPENCODE_PROJECT_DIR}/.opencode/* in the image (see the Dockerfile). Create the
+# targets here rather than at build time: /workspace is a mount point, so anything
+# written there during the build is shadowed once the bind mount lands.
+# Non-fatal: a read-only or unwritable workspace should not stop the container from
+# starting, it just means OpenCode has nowhere to keep state.
+OPENCODE_PROJECT_DIR="${OPENCODE_PROJECT_DIR:-/workspace}"
+OPENCODE_STATE_DIR="${OPENCODE_PROJECT_DIR}/.opencode"
+if ! mkdir -p "${OPENCODE_STATE_DIR}"/{config,data,state,cache} 2> /dev/null; then
+    echo "WARNING: could not create ${OPENCODE_STATE_DIR} - is ${OPENCODE_PROJECT_DIR} writable?"
+    echo "         OpenCode will fail to start until it exists."
+fi
+
 # Display welcome message with version info
 echo "========================================"
 echo "  OpenCode Container"
@@ -34,7 +47,26 @@ if command -v java &> /dev/null; then
     echo "  Java:         ${JAVA_VER}"
 fi
 
+echo "  State:        ${OPENCODE_STATE_DIR}"
 echo "========================================"
+
+# Warn if the consolidated state folder is not ignored by git. It holds
+# opencode.db, which stores provider credentials - committing it would publish
+# them. Only the four runtime subdirectories need ignoring: .opencode also holds
+# project config (opencode.json, agents/, commands/, skills/) that is meant to be
+# committed, so a blanket .opencode/ rule would be wrong.
+if command -v git &> /dev/null \
+   && git -C "${OPENCODE_PROJECT_DIR}" rev-parse --is-inside-work-tree &> /dev/null \
+   && ! git -C "${OPENCODE_PROJECT_DIR}" check-ignore -q .opencode/data 2> /dev/null; then
+    echo ""
+    echo "WARNING: ${OPENCODE_STATE_DIR}/data is not covered by .gitignore."
+    echo "  It contains opencode.db, which stores your provider credentials."
+    echo "  Add to .gitignore (keeping committable project config visible):"
+    echo "    .opencode/config/"
+    echo "    .opencode/data/"
+    echo "    .opencode/state/"
+    echo "    .opencode/cache/"
+fi
 
 # Show browser-automation hint for the Playwright Agent CLI.
 if [[ -f /opt/playwright-browsers/VERSION ]]; then
@@ -89,6 +121,15 @@ echo "      playwright-cli open --config=<file>"
 echo "  - Raw Playwright: chromium.launch({ args: ['--remote-debugging-port=9222','--remote-allow-origins=*'] })"
 echo "  ---------------------------------------------------------------------------"
 echo "  Then forward port 9222 to your machine and open chrome://inspect."
+echo ""
+
+# OpenCode V2 usage notes.
+echo "OpenCode V2:"
+echo "  Add a provider:   run 'opencode' and use /connect, or 'opencode auth login'"
+echo "  Background server: 'opencode service status' (V2 shares one server per container)"
+echo "  Scripted runs:     'opencode run --standalone ...' uses a private server instead"
+echo "  Custom models need explicit limit + capabilities in opencode.json - the model"
+echo "  catalog host (models.opencode.ai) is blocked by the firewall by default."
 echo ""
 
 # Execute the passed command (or default to zsh)
