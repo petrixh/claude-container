@@ -15,3 +15,4 @@ Thumbs.db
 
 # Build artifacts
 *.log
+.claude/settings.local.json

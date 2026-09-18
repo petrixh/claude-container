@@ -1,0 +1,64 @@
+{
+  "name": "OpenCode Sandbox with Docker",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "TZ": "${localEnv:TZ:America/Los_Angeles}",
+      "OPENCODE_VERSION": "latest",
+      "VARIANT": "opencode-dind"
+    },
+    "target": "opencode-dind"
+  },
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
+    "--cap-add=SYS_ADMIN",
+    "--privileged",
+    "--security-opt=seccomp:unconfined"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "eamodio.gitlens",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "redhat.java",
+        "vscjava.vscode-java-pack",
+        "vscjava.vscode-maven"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "editor.formatOnSave": true,
+        "java.configuration.detectJdksAtStart": true
+      }
+    }
+  },
+  "remoteUser": "node",
+  "mounts": [
+    "source=opencode-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+    "source=${localEnv:HOME}/.config/opencode,target=/home/node/.config/opencode,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.local/share/opencode,target=/home/node/.local/share/opencode,type=bind,consistency=cached",
+    "source=opencode-docker-data-${devcontainerId},target=/var/lib/docker,type=volume"
+  ],
+  "forwardPorts": [9222],
+  "portsAttributes": {
+    "9222": {
+      "label": "Playwright CDP",
+      "onAutoForward": "silent"
+    }
+  },
+  "containerEnv": {
+    "GH_TOKEN": "${localEnv:GH_TOKEN}",
+    "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
+    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
+    "NODE_OPTIONS": "--max-old-space-size=4096",
+    "PLAYWRIGHT_BROWSERS_PATH": "/opt/playwright-browsers",
+    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+    "DOCKER_HOST": "unix:///var/run/docker.sock",
+    "VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh"
+}

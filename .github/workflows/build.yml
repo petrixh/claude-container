@@ -23,26 +23,40 @@ jobs:
       packages: write
 
     strategy:
+      # Don't let one flaky variant cancel the others. Each variant is an
+      # independent image, so a transient failure in (e.g.) the opencode build
+      # shouldn't take down the otherwise-healthy base and dind builds.
+      fail-fast: false
       matrix:
         include:
           - variant: base
             image_suffix: ""
           - variant: dind
             image_suffix: "-dind"
+          - variant: opencode
+            image_suffix: "-opencode"
+          - variant: opencode-dind
+            image_suffix: "-opencode-dind"
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
+        with:
+          # Pin to the last-good QEMU. binfmt:latest ships QEMU v9, which has a
+          # regression that makes apt segfault / fail ("Cannot allocate memory")
+          # under arm64 emulation — this broke the multi-arch dind build.
+          # See https://github.com/tonistiigi/binfmt/issues/245
+          image: tonistiigi/binfmt:qemu-v8.1.5
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -50,7 +64,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
           tags: |
@@ -60,7 +74,7 @@ jobs:
 
       # Build for local testing first (single platform)
       - name: Build for testing
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .devcontainer
           file: .devcontainer/Dockerfile
@@ -71,12 +85,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Test Playwright in base variant
-      - name: Test Playwright installation
-        if: matrix.variant == 'base'
+      # Test the JDK: every variant inherits Java from the base-common stage,
+      # so this runs for all four and catches a broken JAVA_HOME symlink too.
+      - name: Test Java installation
         run: |
-          echo "=== Testing Playwright browsers ==="
-          docker run --rm --entrypoint /bin/bash claude-container:base-test -c "
+          echo "=== Testing Java (${{ matrix.variant }}) ==="
+          docker run --rm --entrypoint /bin/bash \
+            -e SKIP_FIREWALL=1 \
+            claude-container:${{ matrix.variant }}-test -c '
+              set -e
+              java -version
+              javac -version
+              test -x "${JAVA_HOME}/bin/java" || { echo "JAVA_HOME is not usable: ${JAVA_HOME}"; exit 1; }
+              java -version 2>&1 | grep -q "openjdk version \"25" || { echo "expected Java 25"; exit 1; }
+            '
+          echo "PASS: Java 25 (Temurin) is installed and on PATH"
+
+      # Test Playwright (base + opencode share the playwright layer)
+      - name: Test Playwright installation
+        if: matrix.variant == 'base' || matrix.variant == 'opencode'
+        run: |
+          echo "=== Testing Playwright browsers (${{ matrix.variant }}) ==="
+          docker run --rm --entrypoint /bin/bash claude-container:${{ matrix.variant }}-test -c "
             echo 'Checking browser directory ownership...'
             ls -la /opt/playwright-browsers/
 
@@ -107,11 +137,11 @@ jobs:
             \"
           "
 
-      # Test Vaadin Pro Key passthrough
+      # Test Vaadin Pro Key passthrough (base + opencode)
       - name: Test Vaadin Pro Key support
-        if: matrix.variant == 'base'
+        if: matrix.variant == 'base' || matrix.variant == 'opencode'
         run: |
-          echo "=== Testing VAADIN_PRO_KEY passthrough ==="
+          echo "=== Testing VAADIN_PRO_KEY passthrough (${{ matrix.variant }}) ==="
           TEST_KEY="test-vaadin-pro-key-12345"
 
           # Test: env var is available inside the container
@@ -119,11 +149,78 @@ jobs:
           docker run --rm \
             -e VAADIN_PRO_KEY="${TEST_KEY}" \
             -e SKIP_FIREWALL=1 \
-            claude-container:base-test \
+            claude-container:${{ matrix.variant }}-test \
             bash -c '[ "${VAADIN_PRO_KEY}" = "'"${TEST_KEY}"'" ]'
           echo "PASS: VAADIN_PRO_KEY env var is set correctly"
 
           echo "=== All Vaadin Pro Key tests passed ==="
+
+      # Test OpenCode CLI is installed and runnable
+      - name: Test OpenCode installation
+        if: matrix.variant == 'opencode' || matrix.variant == 'opencode-dind'
+        run: |
+          echo "=== Testing OpenCode CLI (${{ matrix.variant }}) ==="
+          docker run --rm --entrypoint /bin/bash \
+            -e SKIP_FIREWALL=1 \
+            claude-container:${{ matrix.variant }}-test -c "
+              command -v opencode || { echo 'opencode not found on PATH'; exit 1; }
+              opencode --version
+            "
+          echo "PASS: opencode CLI is installed"
+
+      # Test the Docker daemon starts and works inside the DinD variants.
+      # Bypasses the DinD entrypoint (which also inits the firewall) and starts
+      # dockerd directly so the check is isolated to Docker itself.
+      #
+      # The daemon runs with the `vfs` storage driver via a throwaway config
+      # file: the runner's own Docker storage is overlay2, and overlay cannot be
+      # mounted on top of overlay ("failed to mount overlay: invalid argument"),
+      # so the baked overlay2 daemon.json can't start nested here. vfs needs no
+      # overlay support and exercises the same path — dockerd boots and the CLI
+      # talks to it. The image keeps overlay2 for real hosts, which support it.
+      - name: Test Docker-in-Docker daemon
+        if: matrix.variant == 'dind' || matrix.variant == 'opencode-dind'
+        run: |
+          echo "=== Testing Docker-in-Docker daemon (${{ matrix.variant }}) ==="
+          docker run --rm --privileged --entrypoint /bin/bash \
+            -e SKIP_FIREWALL=1 \
+            claude-container:${{ matrix.variant }}-test -c '
+              set -e
+              command -v docker || { echo "docker not found on PATH"; exit 1; }
+              printf "{\"storage-driver\":\"vfs\"}" | sudo tee /tmp/daemon-vfs.json >/dev/null
+              sudo dockerd --config-file=/tmp/daemon-vfs.json > /tmp/dockerd.log 2>&1 &
+              echo "Waiting for dockerd..."
+              for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
+              docker info >/dev/null 2>&1 || { echo "dockerd failed to start"; cat /tmp/dockerd.log; exit 1; }
+              docker version
+            '
+          echo "PASS: dockerd starts and responds"
+
+      # Test the Playwright Agent CLI is installed, the skill is baked in, and it
+      # can launch the pre-installed Chromium offline (no runtime browser download).
+      - name: Test Playwright Agent CLI
+        if: matrix.variant == 'base' || matrix.variant == 'opencode'
+        run: |
+          echo "=== Testing Playwright Agent CLI (${{ matrix.variant }}) ==="
+          docker run --rm --entrypoint /bin/bash \
+            -e SKIP_FIREWALL=1 \
+            claude-container:${{ matrix.variant }}-test -c '
+              set -e
+              command -v playwright-cli || { echo "playwright-cli not found on PATH"; exit 1; }
+              playwright-cli --version
+
+              echo "Checking pre-installed skill..."
+              test -f /home/node/.claude/skills/playwright-cli/SKILL.md \
+                || { echo "skill SKILL.md not found"; exit 1; }
+
+              echo "Launching pre-installed browser (offline data: URL)..."
+              playwright-cli open
+              playwright-cli goto "data:text/html,<h1>cli-ok</h1>"
+              playwright-cli snapshot | grep -q "cli-ok" \
+                || { echo "expected heading not found in snapshot"; exit 1; }
+              playwright-cli close
+            '
+          echo "PASS: playwright-cli is installed, skill present, browser launches"
 
       # Test default MCP server configuration
       - name: Test default MCP servers
@@ -181,7 +278,7 @@ jobs:
 
       # Build and push multi-platform images
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .devcontainer
           file: .devcontainer/Dockerfile

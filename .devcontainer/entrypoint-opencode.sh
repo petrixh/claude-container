@@ -1,22 +1,18 @@
 #!/bin/bash
-# Entrypoint script for Claude Code container
+# Entrypoint script for OpenCode container
 # Initializes firewall and executes the provided command
 
 set -e
 
-# Ensure CLAUDE_CONFIG_DIR is set so claude CLI writes config to the correct
-# directory (the one that gets bind-mounted / volume-mounted for persistence)
-export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/node/.claude}"
-
 # Display welcome message with version info
 echo "========================================"
-echo "  Claude Code Container"
+echo "  OpenCode Container"
 echo "========================================"
 
-# Show Claude version
-if command -v claude &> /dev/null; then
-    CLAUDE_VER=$(claude --version 2>/dev/null | head -1 || echo "unknown")
-    echo "  Claude Code:  ${CLAUDE_VER}"
+# Show OpenCode version
+if command -v opencode &> /dev/null; then
+    OPENCODE_VER=$(opencode --version 2>/dev/null | head -1 || echo "unknown")
+    echo "  OpenCode:     ${OPENCODE_VER}"
 fi
 
 # Show Playwright version from VERSION file
@@ -46,7 +42,7 @@ if [[ -f /opt/playwright-browsers/VERSION ]]; then
     if [[ -n "${CLI_PKG_VER}" ]]; then
         echo ""
         echo "Playwright Agent CLI (browser automation — faster, lower token use):"
-        echo "  Skill pre-installed at ~/.claude/skills/playwright-cli — Claude loads it on demand."
+        echo "  Skill pre-installed at ~/.claude/skills/playwright-cli — OpenCode discovers it automatically."
         echo "  Drive a browser directly, e.g.: playwright-cli open && playwright-cli goto https://example.com"
     fi
 fi
@@ -61,80 +57,6 @@ if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
     git config --global user.email "${GIT_USER_EMAIL}"
     echo "Git user.email configured: ${GIT_USER_EMAIL}"
 fi
-
-# Configure Claude Code notification hooks if NOTIFICATION_URL is provided
-if [[ -n "${NOTIFICATION_URL:-}" ]]; then
-    CLAUDE_SETTINGS="${CLAUDE_CONFIG_DIR:-/home/node/.claude}/settings.json"
-    mkdir -p "$(dirname "${CLAUDE_SETTINGS}")"
-
-    # Build the hooks JSON
-    # Enabled: idle_prompt (Claude waiting for input), permission_prompt (needs permission)
-    # Additional matchers available: elicitation_dialog, auth_success
-    # Additional hook events: Stop (every response), TaskCompleted
-    HOOKS_JSON=$(cat <<HOOKEOF
-{
-  "hooks": {
-    "Notification": [
-      {
-        "matcher": "idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -sf -d \"Claude is idle - waiting for input\" ${NOTIFICATION_URL}"
-          }
-        ]
-      },
-      {
-        "matcher": "permission_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -sf -d \"Claude needs permission to proceed\" ${NOTIFICATION_URL}"
-          }
-        ]
-      },
-      {
-        "matcher": "elicitation_dialog",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "curl -sf -d \"Claude is waiting for your answer\" ${NOTIFICATION_URL}"
-          }
-        ]
-      }
-    ]
-  }
-}
-HOOKEOF
-    )
-
-    # Merge hooks into existing settings.json (or create new one)
-    if [[ -f "${CLAUDE_SETTINGS}" ]]; then
-        MERGED=$(jq -s '.[0] * .[1]' "${CLAUDE_SETTINGS}" <(echo "${HOOKS_JSON}"))
-        echo "${MERGED}" > "${CLAUDE_SETTINGS}"
-    else
-        echo "${HOOKS_JSON}" > "${CLAUDE_SETTINGS}"
-    fi
-    echo "Notification hooks configured for: ${NOTIFICATION_URL}"
-fi
-
-# Configure default MCP servers using claude mcp add-json (user scope)
-# Only adds if not already configured (avoids overwriting user customizations)
-add_mcp_if_missing() {
-    local name="$1"
-    local json="$2"
-    if claude mcp get "${name}" > /dev/null 2>&1; then
-        echo "  MCP '${name}' already configured, skipping"
-    else
-        claude mcp add-json --scope user "${name}" "${json}" 2>/dev/null && \
-            echo "  MCP '${name}' added" || \
-            echo "  Warning: Failed to add MCP '${name}'"
-    fi
-}
-
-echo "Configuring default MCP servers..."
-add_mcp_if_missing "Vaadin" '{"type":"http","url":"https://mcp.vaadin.com/docs"}'
-add_mcp_if_missing "playwright" '{"command":"npx","args":["@playwright/mcp@latest","--headless","--browser","chromium"]}'
 
 # Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)
 # This requires NET_ADMIN capability to be set

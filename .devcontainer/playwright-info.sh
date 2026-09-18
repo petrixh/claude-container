@@ -13,15 +13,14 @@ if [ -f "$VERSION_FILE" ]; then
     echo "Standard Playwright: ${PW_VER:-unknown}"
     echo "  Chromium:          ${CHROMIUM_BUILD:-unknown}"
 
-    # MCP Playwright
-    MCP_PKG_VER=$(grep "^MCP_PACKAGE_VERSION=" "$VERSION_FILE" | cut -d= -f2)
-    MCP_PW_VER=$(grep "^MCP_PLAYWRIGHT_VERSION=" "$VERSION_FILE" | cut -d= -f2)
-    MCP_CHROMIUM_BUILD=$(grep "^MCP_CHROMIUM_BUILD=" "$VERSION_FILE" | cut -d= -f2)
-    if [ -n "$MCP_PW_VER" ]; then
+    # Playwright Agent CLI
+    CLI_PKG_VER=$(grep "^CLI_PACKAGE_VERSION=" "$VERSION_FILE" | cut -d= -f2)
+    CLI_CHROMIUM_BUILD=$(grep "^CLI_CHROMIUM_BUILD=" "$VERSION_FILE" | cut -d= -f2)
+    if [ -n "$CLI_PKG_VER" ]; then
         echo ""
-        echo "MCP Package:         @playwright/mcp@${MCP_PKG_VER:-unknown}"
-        echo "  Playwright:        ${MCP_PW_VER}"
-        echo "  Chromium:          ${MCP_CHROMIUM_BUILD:-unknown}"
+        echo "Agent CLI:           @playwright/cli@${CLI_PKG_VER}"
+        echo "  Chromium:          ${CLI_CHROMIUM_BUILD:-unknown}"
+        echo "  Skill:             ~/.claude/skills/playwright-cli"
     fi
     echo ""
 fi
@@ -43,28 +42,6 @@ fi
 echo ""
 echo "=== Usage Notes ==="
 echo "- Standard Playwright: For Java Playwright and direct Node.js usage"
-echo "- MCP Playwright: For Claude's browser automation tools (@playwright/mcp)"
-
-# Show recommended .mcp.json if MCP is installed
-if [ -f "$VERSION_FILE" ]; then
-    MCP_PKG_VER=$(grep "^MCP_PACKAGE_VERSION=" "$VERSION_FILE" | cut -d= -f2)
-    if [ -n "$MCP_PKG_VER" ]; then
-        echo ""
-        echo "=== Recommended .mcp.json ==="
-        echo "To use pre-installed browsers (no download at runtime):"
-        echo ""
-        echo '{'
-        echo '  "mcpServers": {'
-        echo '    "playwright": {'
-        echo '      "command": "npx",'
-        echo '      "args": ['
-        echo "        \"@playwright/mcp@${MCP_PKG_VER}\","
-        echo '        "--headless",'
-        echo '        "--browser",'
-        echo '        "chromium"'
-        echo '      ]'
-        echo '    }'
-        echo '  }'
-        echo '}'
-    fi
-fi
+echo "- Agent CLI (@playwright/cli): For agent browser automation —"
+echo "    faster, lower token use. Pre-installed skill: ~/.claude/skills/playwright-cli"
+echo "    (run 'playwright-cli --help')"
