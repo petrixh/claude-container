@@ -133,8 +133,10 @@ add_mcp_if_missing() {
 }
 
 echo "Configuring default MCP servers..."
+# Browser automation is not an MCP here: the Playwright MCP was removed in
+# favour of the Playwright Agent CLI (see #27), which the image installs
+# together with its skill.
 add_mcp_if_missing "Vaadin" '{"type":"http","url":"https://mcp.vaadin.com/docs"}'
-add_mcp_if_missing "playwright" '{"command":"npx","args":["@playwright/mcp@latest","--headless","--browser","chromium"]}'
 
 # Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)
 # This requires NET_ADMIN capability to be set

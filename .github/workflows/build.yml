@@ -237,23 +237,8 @@ jobs:
 
               echo ""
               echo "Validating MCP servers..."
-              FAIL=0
-
-              if echo "${OUTPUT}" | grep -q "Vaadin.*Connected"; then
-                echo "PASS: Vaadin MCP connected"
-              else
-                echo "FAIL: Vaadin MCP not connected"
-                FAIL=1
-              fi
-
-              if echo "${OUTPUT}" | grep -q "playwright.*Connected"; then
-                echo "PASS: Playwright MCP connected"
-              else
-                echo "FAIL: Playwright MCP not connected"
-                FAIL=1
-              fi
-
-              exit ${FAIL}
+              echo "${OUTPUT}" | grep -q "Vaadin.*Connected" || { echo "FAIL: Vaadin MCP not connected"; exit 1; }
+              echo "PASS: Vaadin MCP connected"
             '
 
           echo ""
