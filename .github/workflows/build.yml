@@ -85,6 +85,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Test the JDK: every variant inherits Java from the base-common stage,
+      # so this runs for all four and catches a broken JAVA_HOME symlink too.
+      - name: Test Java installation
+        run: |
+          echo "=== Testing Java (${{ matrix.variant }}) ==="
+          docker run --rm --entrypoint /bin/bash \
+            -e SKIP_FIREWALL=1 \
+            claude-container:${{ matrix.variant }}-test -c '
+              set -e
+              java -version
+              javac -version
+              test -x "${JAVA_HOME}/bin/java" || { echo "JAVA_HOME is not usable: ${JAVA_HOME}"; exit 1; }
+              java -version 2>&1 | grep -q "openjdk version \"25" || { echo "expected Java 25"; exit 1; }
+            '
+          echo "PASS: Java 25 (Temurin) is installed and on PATH"
+
       # Test Playwright (base + opencode share the playwright layer)
       - name: Test Playwright installation
         if: matrix.variant == 'base' || matrix.variant == 'opencode'
