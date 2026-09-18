@@ -1,5 +1,5 @@
 # Coding Agent Development Container
-# Based on the official reference implementation with Java 21 support
+# Based on the official reference implementation with Java 25 support
 # Multi-stage build supporting base (Claude Code), opencode, and their
 # Docker-in-Docker variants (dind, opencode-dind)
 
@@ -60,18 +60,18 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Java 21 (Eclipse Temurin/Adoptium)
+# Install Java 25 (Eclipse Temurin/Adoptium)
 RUN mkdir -p /etc/apt/keyrings \
     && wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/adoptium.list \
     && apt-get update \
-    && apt-get install -y temurin-21-jdk \
+    && apt-get install -y temurin-25-jdk \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Set JAVA_HOME (create symlink for architecture independence)
-RUN ln -s /usr/lib/jvm/temurin-21-jdk-* /usr/lib/jvm/temurin-21-jdk
-ENV JAVA_HOME=/usr/lib/jvm/temurin-21-jdk
+RUN ln -s /usr/lib/jvm/temurin-25-jdk-* /usr/lib/jvm/temurin-25-jdk
+ENV JAVA_HOME=/usr/lib/jvm/temurin-25-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # Install Playwright globally with Chromium browser (full + headless shell)

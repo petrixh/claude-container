@@ -221,7 +221,7 @@ Below is a more compehensive example with instructions etc... Reading through th
 
 A Docker devcontainer for running Claude Code in a sandboxed environment with:
 - Node.js 20
-- Java 21 (Eclipse Temurin)
+- Java 25 (Eclipse Temurin)
 - Playwright with headless Chromium (arm64/amd64)
 - GitHub CLI with PAT authentication
 - Domain-whitelist firewall (default deny)
