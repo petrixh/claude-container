@@ -251,8 +251,10 @@ This repository provides Claude Code and OpenCode variants. The Claude Code vari
 | **`claude-docker-host`** | 3.92GB | ✅ Via host | Docker development, testing | Requires host Docker |
 | **`claude-dind`** | 3.92GB | ✅ Isolated | Secure isolation, CI/CD | Firewall blocks Docker Hub |
 
-The OpenCode variants swap Claude Code for [sst/opencode](https://opencode.ai) but share the
-same base (Java, Playwright, firewall, Playwright Agent CLI skill):
+The OpenCode variants swap Claude Code for [OpenCode](https://opencode.ai) but share the
+same base (Java, Playwright, firewall, Playwright Agent CLI skill). They ship **OpenCode
+V2** — see [OpenCode V2 in this container](#opencode-v2-in-this-container) for what that
+changes, and [`OPENCODE_V2_UPGRADE.md`](OPENCODE_V2_UPGRADE.md) for the full analysis:
 
 | Variant | Docker | Best For | Limitations |
 |---------|--------|----------|-------------|
@@ -483,7 +485,7 @@ mv .devcontainer/devcontainer-dind.json .devcontainer/devcontainer.json
 ```
 
 ### OpenCode Variants
-Use the OpenCode configurations to run [sst/opencode](https://opencode.ai) instead of Claude Code:
+Use the OpenCode configurations to run [OpenCode](https://opencode.ai) instead of Claude Code:
 
 ```bash
 # OpenCode (no Docker)
@@ -494,6 +496,113 @@ devcontainer up --workspace-folder . \
 devcontainer up --workspace-folder . \
   --config .devcontainer/devcontainer-opencode-dind.json
 ```
+
+### OpenCode V2 in this container
+
+The OpenCode variants run **V2**. Three things differ from a stock install.
+
+#### All state lives in `./.opencode` in your project
+
+Config, sessions, credentials and cache are consolidated into one folder next to your
+code, instead of being scattered across four XDG directories:
+
+```
+myproject/
+├── .opencode/
+│   ├── config/     # opencode.json, cli.json, service password
+│   ├── data/       # opencode.db (sessions AND credentials), logs, repos
+│   ├── state/
+│   └── cache/
+├── src/
+└── ...
+```
+
+It rides along on the existing workspace mount — there is no separate volume or bind to
+configure — so it survives `docker system prune` and container rebuilds, and moving or
+copying the project takes your session history with it. The container creates the folder
+on first start.
+
+> **⚠️ Add these to your project's `.gitignore`.** `.opencode/data/opencode.db` stores
+> your provider credentials.
+>
+> ```gitignore
+> .opencode/config/
+> .opencode/data/
+> .opencode/state/
+> .opencode/cache/
+> ```
+>
+> Ignore those four subdirectories rather than `.opencode/` wholesale: the same folder is
+> where OpenCode looks for *project* config — `opencode.json`, `agents/`, `commands/`,
+> `skills/` — which is meant to be committed. The container warns on startup if the
+> runtime folders are not ignored.
+
+Because state is per project, you authenticate once per project rather than once per
+machine. Run `opencode` and use `/connect`, or `opencode auth login`.
+
+#### V2 runs a background server
+
+V2 shares one background server per container instead of starting a process per session:
+
+```bash
+opencode service status      # is it running, and on which loopback port
+opencode service stop        # stop it
+opencode run --standalone …  # use a private server instead (good for scripts and CI)
+```
+
+It binds loopback only, so the firewall needs no changes and nothing is exposed outside
+the container.
+
+#### Custom models need explicit limits
+
+The firewall blocks `models.opencode.ai` by default, which is where OpenCode fetches
+model metadata. Models you configure yourself therefore need their limits and
+capabilities spelled out in `opencode.json`, or you get premature compaction and rejected
+image attachments with no error message:
+
+```jsonc
+{
+  "providers": {
+    "acme": {
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": { "baseURL": "https://llm.example.com/v1", "apiKey": "{env:ACME_API_KEY}" },
+      "models": {
+        "acme-1": {
+          "modelID": "acme-1",
+          "capabilities": { "tools": true, "input": ["text", "image"], "output": ["text"] },
+          "limit": { "context": 128000, "input": 120000, "output": 8192 }
+        }
+      }
+    }
+  }
+}
+```
+
+Uncomment `models.opencode.ai` in `.devcontainer/allowed-domains.conf` to fetch the
+catalog instead. Note that `opencode.ai` itself is allowed by default and doubles as the
+OpenCode Zen inference endpoint used by the built-in free models — comment it out for an
+inference-free sandbox, at the cost of OAuth provider login.
+
+#### Pinning the version
+
+`OPENCODE_VERSION` defaults to `latest`, which the build resolves against OpenCode's
+update API. Pin a specific release, or build a V1 image, with build args:
+
+```bash
+# A specific V2 release
+docker build --target opencode --build-arg OPENCODE_VERSION=2.0.3 \
+  -t claude-container:opencode .devcontainer/
+
+# Stay on V1
+docker build --target opencode \
+  --build-arg OPENCODE_CHANNEL=v1 --build-arg OPENCODE_VERSION=1.18.30 \
+  -t claude-container:opencode-v1 .devcontainer/
+```
+
+**Upgrading from V1?** Your config needs migrating — `provider` → `providers`,
+`mcp.<name>` → `mcp.servers.<name>`, `permission` → `permissions`, and more. See
+[`OPENCODE_V2_UPGRADE.md`](OPENCODE_V2_UPGRADE.md) §6 and the
+[official guide](https://opencode.ai/v2/docs/migrate-v1/).
 
 ## Docker-in-Docker Usage
 

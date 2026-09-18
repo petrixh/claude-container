@@ -33,9 +33,7 @@
   },
   "remoteUser": "node",
   "mounts": [
-    "source=opencode-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
-    "source=${localEnv:HOME}/.config/opencode,target=/home/node/.config/opencode,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.local/share/opencode,target=/home/node/.local/share/opencode,type=bind,consistency=cached"
+    "source=opencode-bashhistory-${devcontainerId},target=/commandhistory,type=volume"
   ],
   "forwardPorts": [9222],
   "portsAttributes": {

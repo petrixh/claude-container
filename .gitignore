@@ -16,3 +16,11 @@ Thumbs.db
 # Build artifacts
 *.log
 .claude/settings.local.json
+
+# OpenCode container state (credentials live in .opencode/data/opencode.db).
+# Project config under .opencode/ - opencode.json, agents/, commands/, skills/ -
+# is deliberately NOT ignored, so it can be committed and shared.
+.opencode/config/
+.opencode/data/
+.opencode/state/
+.opencode/cache/
