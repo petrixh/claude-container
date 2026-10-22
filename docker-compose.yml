@@ -128,8 +128,8 @@ services:
       - NET_ADMIN
       - NET_RAW
     volumes:
-      - ${HOME}/.config/opencode:/home/node/.config/opencode:cached
-      - ${HOME}/.local/share/opencode:/home/node/.local/share/opencode:cached
+      # OpenCode state lives in ./.opencode inside the project, reached through the
+      # workspace mount below - no separate mount needed. See OPENCODE_V2_UPGRADE.md.
       - ./:/workspace:delegated
       - opencode-bashhistory:/commandhistory
     environment:
@@ -166,8 +166,8 @@ services:
     security_opt:
       - seccomp:unconfined
     volumes:
-      - ${HOME}/.config/opencode:/home/node/.config/opencode:cached
-      - ${HOME}/.local/share/opencode:/home/node/.local/share/opencode:cached
+      # OpenCode state lives in ./.opencode inside the project, reached through the
+      # workspace mount below - no separate mount needed. See OPENCODE_V2_UPGRADE.md.
       - ./:/workspace:delegated
       - opencode-bashhistory:/commandhistory
       - opencode-docker-data:/var/lib/docker
