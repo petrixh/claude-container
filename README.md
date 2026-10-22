@@ -590,7 +590,7 @@ update API. Pin a specific release, or build a V1 image, with build args:
 
 ```bash
 # A specific V2 release
-docker build --target opencode --build-arg OPENCODE_VERSION=2.0.3 \
+docker build --target opencode --build-arg OPENCODE_VERSION=2.1.2 \
   -t claude-container:opencode .devcontainer/
 
 # Stay on V1

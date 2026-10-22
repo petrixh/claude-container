@@ -196,7 +196,7 @@ FROM base-common AS opencode
 # installer URLs; keeping this as a build arg means a V1 image is still one
 # build away. See OPENCODE_V2_UPGRADE.md.
 ARG OPENCODE_CHANNEL=v2
-# OPENCODE_VERSION: pass "latest" (default) or a specific version like "2.0.3"
+# OPENCODE_VERSION: pass "latest" (default) or a specific version like "2.1.2"
 ARG OPENCODE_VERSION=latest
 ENV OPENCODE_VERSION=${OPENCODE_VERSION}
 
@@ -211,9 +211,9 @@ USER root
 # Tar is already provided by the node:trixie base image.
 #
 # "latest" is resolved explicitly against the update API rather than left to the
-# installer: the published V2 script hardcodes the `beta` channel, which lags the
-# real releases (it served 2.0.1 while `latest` was already 2.0.3), so trusting
-# its default silently builds an old version.
+# installer. Early V2 scripts hardcoded the frozen `beta` channel and silently
+# built an old release; the current script reads `latest` itself, but resolving
+# here keeps that from regressing and logs the exact version baked in.
 #
 # --no-modify-path suppresses the installer's .zshrc PATH edit. The symlink in
 # /usr/local/bin is what puts opencode on PATH for every user and shell.

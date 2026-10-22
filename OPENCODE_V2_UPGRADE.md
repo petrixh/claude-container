@@ -4,7 +4,8 @@ Investigation for [#30](https://github.com/petrixh/claude-container/issues/30).
 Reference: [https://opencode.ai/v2/docs/migrate-v1/](https://opencode.ai/v2/docs/migrate-v1/)
 
 **Status:** implemented on this branch — see §9 for what landed where. Verified against a
-real `--target opencode` build, which resolved and installed **v2.0.4**.
+real `--target opencode` build, which resolved and installed **v2.0.4**, and re-verified
+on **v2.1.2** after OpenCode V2 became the official release.
 
 **Verified against:** OpenCode **v2.0.1** and **v2.0.3**, installed from
 `https://opencode.ai/v2/install` on linux/arm64 (glibc) and compared against the
@@ -43,7 +44,7 @@ at it.
 | ------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Install script            | `https://opencode.ai/install`                                                    | `https://opencode.ai/v2/install`                                        |
 | Artifact source           | `github.com/anomalyco/opencode/releases` (+ `api.github.com` for the latest tag) | `registry.npmjs.org/@opencode/cli-<os>-<arch>/-/cli-<target>-<ver>.tgz` |
-| Version metadata | GitHub releases API | `https://opencode.ai/update/api/beta/cli/npm` — **see the channel trap below** |
+| Version metadata | GitHub releases API | `https://opencode.ai/update/api/latest/cli/npm` — **see the channel trap below** |
 | npm package               | `opencode-ai`                                                                    | `@opencode/cli`                                                         |
 | Docker image              | —                                                                                | `ghcr.io/anomalyco/opencode:<version>`                                  |
 | Binary size (linux/arm64) | 176 MB                                                                           | 193 MB                                                                  |
@@ -62,35 +63,34 @@ The existing `bash -s -- --version ${OPENCODE_VERSION}` invocation works as-is.
 **Note:** V2 also drops a tiny `opencode2` shim next to the binary
 (`exec "$(dirname "$0")/opencode" "$@"`). Harmless; no symlink needed for it.
 
-### The channel trap — `latest` is *not* what the script installs
+### The channel trap — fixed upstream, guarded here anyway
 
-The published v2 installer hardcodes the **`beta`** channel:
+Early v2 installers hardcoded the **`beta`** channel:
 
 ```bash
 metadata=$(curl -fsSL https://opencode.ai/update/api/beta/cli/npm || true)
 ```
 
-That endpoint is stale. Checked side by side *(verified)*:
+That channel froze at **2.0.1** while `latest` moved on (2.0.3 at the time), so
+`OPENCODE_VERSION=latest` silently built an old release — which is why the first pass of
+this document was written against 2.0.1.
+
+**As of the 2.1.x installer this is fixed** *(verified 2026-10-22)*: the script now reads
+`update/api/latest/cli/npm` and picks up the package scope from it. Checked side by side:
 
 | Source | Version |
 |---|---|
-| `opencode.ai/update/api/beta/cli/npm` (what the script uses) | **2.0.1** |
-| `opencode.ai/update/api/latest/cli/npm` | **2.0.3** |
-| npm `@opencode/cli` dist-tag `latest` | **2.0.3** |
-| npm dist-tag `beta` | `0.0.0-beta-19507` |
-| npm dist-tag `dev` | `0.0.0-dev-19638` |
+| `opencode.ai/update/api/latest/cli/npm` (what the script now uses) | **2.1.2** |
+| `opencode.ai/update/api/beta/cli/npm` (still frozen) | 2.0.1 |
+| npm `opencode-ai` dist-tag `latest` (V1) | 1.19.3 |
 
-So `OPENCODE_VERSION=latest` today silently builds **2.0.1**, three patch releases
-behind — which is exactly why the first pass of this document was written against 2.0.1.
-These are ordinary releases, not prereleases: v2.0.2 and v2.0.3 are published on GitHub
-with `prerelease: false`. The `beta` name in the URL looks like a leftover from the v2
-prerelease period that was never repointed. (The GitHub *releases* API is no help either
-— `releases/latest` still returns **v1.18.31**, since v1 and v2 share a repo.)
+`opencode.ai/install` remains V1-only and now explicitly refuses a 2.x `--version`, so
+the two installer URLs are still not interchangeable. (The GitHub *releases* API is no
+help for picking a version either, since v1 and v2 share a repo.)
 
-`stable`, `v2` and `release` are not valid channels (404). Only `beta` and `latest` exist.
-
-**Recommendation: never rely on the script's default.** Resolve the `latest` channel
-explicitly and pass it through — `jq` is already in the image:
+**The Dockerfile still resolves `latest` explicitly** and passes it through — cheap
+insurance against the default regressing, and every build logs the exact version it
+baked in, which is what the weekly scheduled build needs:
 
 ```dockerfile
 RUN if [ "${OPENCODE_VERSION}" = "latest" ]; then \
@@ -99,9 +99,7 @@ RUN if [ "${OPENCODE_VERSION}" = "latest" ]; then \
  && su - node -c "curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path --version ${OPENCODE_VERSION}"
 ```
 
-*(Verified: resolving the endpoint and passing `--version 2.0.3` installs
-`opencode v2.0.3`.)* This also makes every build log the exact version it baked in, which
-is what the weekly scheduled build needs.
+*(Verified: the build logs `Installing opencode 2.1.2` and installs `opencode v2.1.2`.)*
 
 The alternative is `npm install -g @opencode/cli`, which resolves the npm `latest`
 dist-tag correctly and would also sidestep §4's install-directory problem — worth
@@ -914,7 +912,7 @@ Worth adding to `.env.example` / the README:
 ## 9. Work plan — implemented
 
 All six items have landed on this branch. Verified on a local `--target opencode` build:
-the version resolver picked up **2.0.4**, the four XDG symlinks resolve into
+the version resolver picked up **2.0.4** (and later **2.1.2**), the four XDG symlinks resolve into
 `/workspace/.opencode`, `opencode debug paths` agrees, the background server starts and
 writes `opencode.db` into the state folder, the `.gitignore` warning fires only when the
 rules are missing, and the firewall allows `opencode.ai` while blocking
@@ -922,8 +920,8 @@ rules are missing, and the firewall allows `opencode.ai` while blocking
 
 
 1. **`Dockerfile`** — add an `OPENCODE_CHANNEL` build arg (default `v2`) switching the
-   install URL; resolve `latest` through `update/api/latest` rather than trusting the
-   script's stale `beta` default (§1); install with `--no-modify-path`; set
+   install URL; resolve `latest` through `update/api/latest` explicitly rather than
+   trusting the script's default, which once pointed at the stale `beta` channel (§1); install with `--no-modify-path`; set
    `OPENCODE_DISABLE_AUTOUPDATE=1`; symlink the four XDG directories into
    `/workspace/.opencode` (§4).
 2. **`allowed-domains.conf`** — add `models.opencode.ai` as a **commented-out** entry
@@ -950,9 +948,8 @@ rules are missing, and the firewall allows `opencode.ai` while blocking
 
 - **Keep a V1 variant?** The build arg above makes it a one-line opt-in without doubling
   the CI matrix. Alternatively drop V1 entirely once V2 is confirmed working.
-- **Pin the version?** Given the channel trap in §1, `latest` must at minimum be resolved
-  through `update/api/latest`. Whether to go further and pin an exact version (e.g.
-  `2.0.3`) is a separate call — it makes the weekly scheduled build fully reproducible at
+- **Pin the version?** `latest` is resolved through `update/api/latest` (§1). Whether to
+  go further and pin an exact version (e.g. `2.1.2`) is a separate call — it makes the weekly scheduled build fully reproducible at
   the cost of manual bumps.
 - **Per-project vs. per-machine login.** The `./.opencode` layout means logging in once
   per project. Arguably the right default for a sandbox, but it differs from the Claude
