@@ -37,6 +37,9 @@
     "source=${localEnv:HOME}/.config/opencode,target=/home/node/.config/opencode,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.local/share/opencode,target=/home/node/.local/share/opencode,type=bind,consistency=cached"
   ],
+  // Optional SSH access (set SSH_PUBLIC_KEY on the host): publish container port 2222.
+  // Change the first number to use another host port, e.g. when running several containers.
+  // "appPort": ["2222:2222"],
   "forwardPorts": [9222],
   "portsAttributes": {
     "9222": {
@@ -51,9 +54,10 @@
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "PLAYWRIGHT_BROWSERS_PATH": "/opt/playwright-browsers",
     "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
-    "VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}"
+    "VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}",
+    "SSH_PUBLIC_KEY": "${localEnv:SSH_PUBLIC_KEY}"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh"
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && /usr/local/bin/setup-ssh.sh"
 }

@@ -28,8 +28,12 @@ services:
       - DEVCONTAINER=true
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
       - NOTIFICATION_URL=${NOTIFICATION_URL:-}
+      - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
     ports:
       - "9222:9222"
+      # Optional SSH access (set SSH_PUBLIC_KEY): uncomment to publish sshd.
+      # Change the host port (left side) when running several containers.
+      # - "2222:2222"
     working_dir: /workspace
     stdin_open: true
     tty: true
@@ -69,8 +73,12 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
       - NOTIFICATION_URL=${NOTIFICATION_URL:-}
+      - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
     ports:
       - "9222:9222"
+      # Optional SSH access (set SSH_PUBLIC_KEY): uncomment to publish sshd.
+      # Change the host port (left side) when running several containers.
+      # - "2222:2222"
     working_dir: /workspace
     stdin_open: true
     tty: true
@@ -106,8 +114,12 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
       - NOTIFICATION_URL=${NOTIFICATION_URL:-}
+      - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
     ports:
       - "9222:9222"
+      # Optional SSH access (set SSH_PUBLIC_KEY): uncomment to publish sshd.
+      # Change the host port (left side) when running several containers.
+      # - "2222:2222"
     working_dir: /workspace
     stdin_open: true
     tty: true
@@ -140,8 +152,12 @@ services:
       - NODE_OPTIONS=--max-old-space-size=4096
       - DEVCONTAINER=true
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
+      - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
     ports:
       - "9222:9222"
+      # Optional SSH access (set SSH_PUBLIC_KEY): uncomment to publish sshd.
+      # Change the host port (left side) when running several containers.
+      # - "2222:2222"
     working_dir: /workspace
     stdin_open: true
     tty: true
@@ -180,8 +196,12 @@ services:
       - DEVCONTAINER=true
       - DOCKER_HOST=unix:///var/run/docker.sock
       - VAADIN_PRO_KEY=${VAADIN_PRO_KEY:-}
+      - SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}
     ports:
       - "9222:9222"
+      # Optional SSH access (set SSH_PUBLIC_KEY): uncomment to publish sshd.
+      # Change the host port (left side) when running several containers.
+      # - "2222:2222"
     working_dir: /workspace
     stdin_open: true
     tty: true

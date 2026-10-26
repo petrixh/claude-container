@@ -51,6 +51,13 @@ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # Alternatively, mount a ~/.vaadin/proKey file into the container
 # VAADIN_PRO_KEY=your-pro-key-here
 
+# SSH public key (optional) - when set, an SSH server is started inside the
+# container on port 2222 (key-only auth, user "node"). Publish the port with
+# e.g. -p 2222:2222 and connect with: ssh -p 2222 node@localhost
+# Generate a key pair on Linux/macOS with:
+#   ssh-keygen -t ed25519 -f ~/.ssh/claude-container -N "" && cat ~/.ssh/claude-container.pub
+# SSH_PUBLIC_KEY=ssh-ed25519 AAAA... you@example.com
+
 # Node.js memory limit
 NODE_OPTIONS=--max-old-space-size=4096
 ```
@@ -60,6 +67,10 @@ For a first test the above config disables the firewall, enables chrome CDP debu
 * If you want to commit inside the container, you probably want to set the `GIT_USER` related params
 * If you want to use Vaadin commercial components, either set your `proKey` (just the value starting with `pro-` in the environment variable, or later inside the contaier `mkdir -p ~/.vaadin && nano ~/node/.vaadin/proKey` and copy your entire prokey from a different system (or follow the browser process to sign in...)
 * `GH_TOKEN` is there if you want to use Github fine graned PATs for limited access to GH from within the container
+* (Optional) If you want to SSH into the container (e.g. from another machine or your IDE's remote-SSH), generate a key pair and put the public key in `SSH_PUBLIC_KEY`. One-liner for Linux/macOS that creates the key and prints the line to paste into `.env`:
+  ```
+  ssh-keygen -t ed25519 -f ~/.ssh/claude-container -N "" && echo "SSH_PUBLIC_KEY=$(cat ~/.ssh/claude-container.pub)"
+  ```
 * etc..
 
 
@@ -76,6 +87,14 @@ docker run -it --rm \
   -p 9222:9222 \
   ghcr.io/petrixh/claude-container:latest
 ```
+
+(Optional) If you set `SSH_PUBLIC_KEY`, also publish the SSH port by adding `-p 2222:2222 \` to the command above (change the first number to use a different host port, e.g. when running several containers), then connect from the host with:
+
+```
+ssh -i ~/.ssh/claude-container -p 2222 node@localhost
+```
+
+See [SSH Access](#ssh-access) for details.
 
 
 Clone your projects under `/workspace`, run claude do stuff :) 
@@ -100,6 +119,7 @@ then create a deccontainer file under `.devcontainer/devcontainer.json` with the
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_RAW",
     "--env-file=.devcontainer/.env", //if desired to setup vars in a file instead, comment out containerEnv-entries if used
+    // "--publish=2222:2222", // optional SSH access when SSH_PUBLIC_KEY is set, change the first number for a different host port
   ],
 // If you want to bring env variables from your current environment to the devconatiner
   // "containerEnv": {
@@ -113,6 +133,7 @@ then create a deccontainer file under `.devcontainer/devcontainer.json` with the
   //   "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
   //   //"VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}",
   //   "NOTIFICATION_URL": "${localEnv:NOTIFICATION_URL}",
+  //   "SSH_PUBLIC_KEY": "${localEnv:SSH_PUBLIC_KEY}",
   // },
   "customizations": {
     "vscode": {
@@ -192,6 +213,13 @@ PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # Vaadin Pro/Commercial key (for Charts, Board, Acceleration Kits, etc.)
 # Alternatively, mount a ~/.vaadin/proKey file into the container
 # VAADIN_PRO_KEY=your-pro-key-here
+
+# SSH public key (optional) - when set, an SSH server is started inside the
+# container on port 2222 (key-only auth, user "node"). Publish the port with
+# e.g. -p 2222:2222 and connect with: ssh -p 2222 node@localhost
+# Generate a key pair on Linux/macOS with:
+#   ssh-keygen -t ed25519 -f ~/.ssh/claude-container -N "" && cat ~/.ssh/claude-container.pub
+# SSH_PUBLIC_KEY=ssh-ed25519 AAAA... you@example.com
 
 # Node.js memory limit
 NODE_OPTIONS=--max-old-space-size=4096
@@ -685,6 +713,7 @@ firewall-reload
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
 | `NOTIFICATION_URL` | URL to POST notifications to when Claude is idle or needs permission (e.g., `https://ntfy.sh/your-topic`) |
 | `VAADIN_PRO_KEY` | Vaadin Pro/Commercial subscription key for commercial components (Charts, Board, etc.) and Acceleration Kits |
+| `SSH_PUBLIC_KEY` | Optional SSH public key(s). When set, sshd starts on container port 2222 with key-only login as `node` (see [SSH Access](#ssh-access)) |
 
 ## Notifications
 
@@ -722,6 +751,52 @@ You can manually add more hooks to `~/.claude/settings.json` for these events:
 | `TaskCompleted` (event) | A task was marked as completed |
 
 See the [Claude Code hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) for the full reference.
+
+## SSH Access
+
+All variants can optionally run an SSH server, so you can connect from another terminal, another machine, or an IDE's remote-SSH feature. It is **off by default** and only starts when `SSH_PUBLIC_KEY` is set.
+
+### Setup
+
+1. Generate a key pair on your host (Linux/macOS one-liner, prints the line to paste into `.env`):
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/claude-container -N "" && echo "SSH_PUBLIC_KEY=$(cat ~/.ssh/claude-container.pub)"
+   ```
+2. Add the printed `SSH_PUBLIC_KEY=...` line to your `.env` file (or pass it with `-e SSH_PUBLIC_KEY="$(cat ~/.ssh/claude-container.pub)"`).
+3. Publish the SSH port. The container always listens on **2222**; choose any host port:
+   ```bash
+   docker run -it --rm \
+     --cap-add=NET_ADMIN \
+     --cap-add=NET_RAW \
+     --env-file .env \
+     -v "$(pwd):/workspace" \
+     -p 2222:2222 \
+     claude-container:base
+   ```
+   With Docker Compose, uncomment the `# - "2222:2222"` line under the service's `ports:`. With the dev container configs, uncomment `"appPort"`.
+4. Connect:
+   ```bash
+   ssh -i ~/.ssh/claude-container -p 2222 node@localhost
+   ```
+
+### Details
+
+- **Key-only login** as the `node` user. Password and root logins are disabled.
+- `SSH_PUBLIC_KEY` may contain several keys separated by newlines. The keys are added to `/home/node/.ssh/authorized_keys` with the correct ownership and permissions (`700` for `~/.ssh`, `600` for the file).
+- SSH sessions get the same environment as the container (`GH_TOKEN`, `CLAUDE_CONFIG_DIR`, `JAVA_HOME`, `PATH`, ...) and use zsh, so `claude`/`opencode`, `java`, `gh` etc. work as in `docker exec`.
+- **Running several containers:** give each one a different host port, e.g. `-p 2223:2222`, and connect with `ssh -p 2223 ...`.
+- **Host keys** are generated when the container starts, so a new container (e.g. after `--rm`) has new host keys and `ssh` warns about a changed host key. For local throwaway containers you can skip host key checks with an entry in `~/.ssh/config`:
+  ```
+  Host claude-container
+    HostName localhost
+    Port 2222
+    User node
+    IdentityFile ~/.ssh/claude-container
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+  ```
+  Then just `ssh claude-container`.
+- The firewall only restricts **outbound** traffic, so it doesn't block incoming SSH. To accept connections from your own machine only, publish the port on loopback: `-p 127.0.0.1:2222:2222`.
 
 ## Vaadin Commercial Components
 
