@@ -40,6 +40,9 @@
     "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
     "source=claude-docker-data-${devcontainerId},target=/var/lib/docker,type=volume"
   ],
+  // Optional SSH access (set SSH_PUBLIC_KEY on the host): publish container port 2222.
+  // Change the first number to use another host port, e.g. when running several containers.
+  // "appPort": ["2222:2222"],
   "forwardPorts": [9222],
   "portsAttributes": {
     "9222": {
@@ -55,9 +58,10 @@
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
     "DOCKER_HOST": "unix:///var/run/docker.sock",
     "VAADIN_PRO_KEY": "${localEnv:VAADIN_PRO_KEY}",
-    "NOTIFICATION_URL": "${localEnv:NOTIFICATION_URL}"
+    "NOTIFICATION_URL": "${localEnv:NOTIFICATION_URL}",
+    "SSH_PUBLIC_KEY": "${localEnv:SSH_PUBLIC_KEY}"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh"
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && /usr/local/bin/setup-ssh.sh"
 }

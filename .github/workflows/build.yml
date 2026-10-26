@@ -222,6 +222,56 @@ jobs:
             '
           echo "PASS: playwright-cli is installed, skill present, browser launches"
 
+      # Test the optional SSH server: off without SSH_PUBLIC_KEY; with it, key
+      # login as node works on port 2222, password login is refused, and the
+      # session sees the container environment (JAVA_HOME, PATH, ...).
+      - name: Test optional SSH server
+        if: matrix.variant == 'base' || matrix.variant == 'opencode'
+        run: |
+          echo "=== Testing optional SSH server (${{ matrix.variant }}) ==="
+          IMAGE=claude-container:${{ matrix.variant }}-test
+
+          echo "Test: sshd is not started without SSH_PUBLIC_KEY..."
+          docker run --rm -e SKIP_FIREWALL=1 "${IMAGE}" bash -c '! pgrep -x sshd'
+          echo "PASS: sshd not running by default"
+
+          ssh-keygen -t ed25519 -f /tmp/ci-ssh-key -N "" -q
+          docker run -d --name ssh-test \
+            -e SKIP_FIREWALL=1 \
+            -e SSH_PUBLIC_KEY="$(cat /tmp/ci-ssh-key.pub)" \
+            -p 2222:2222 \
+            "${IMAGE}" sleep infinity
+          trap 'docker rm -f ssh-test >/dev/null' EXIT
+
+          SSH_OPTS="-p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=5"
+          for i in $(seq 1 30); do
+            ssh ${SSH_OPTS} -i /tmp/ci-ssh-key node@localhost true 2>/dev/null && break
+            sleep 1
+          done
+
+          echo "Test: authorized_keys permissions..."
+          docker exec ssh-test bash -c '
+            [ "$(stat -c %a /home/node/.ssh)" = 700 ] &&
+            [ "$(stat -c %a /home/node/.ssh/authorized_keys)" = 600 ] &&
+            [ "$(stat -c %U /home/node/.ssh/authorized_keys)" = node ]
+          ' || { docker logs ssh-test; exit 1; }
+          echo "PASS: ~/.ssh is 700, authorized_keys is 600 and owned by node"
+
+          echo "Test: key login works and session has the container env..."
+          ssh ${SSH_OPTS} -i /tmp/ci-ssh-key node@localhost '
+            set -e
+            [ "$(whoami)" = node ]
+            [ -n "${JAVA_HOME}" ] && java -version
+            [ "${SKIP_FIREWALL}" = 1 ]
+          ' || { docker logs ssh-test; exit 1; }
+          echo "PASS: key login as node works, container env is loaded"
+
+          echo "Test: password login is refused..."
+          if ssh ${SSH_OPTS} -o PubkeyAuthentication=no -o PreferredAuthentications=password node@localhost true; then
+            echo "password login unexpectedly succeeded"; exit 1
+          fi
+          echo "PASS: password login refused"
+
       # Build and push multi-platform images
       - name: Build and push
         uses: docker/build-push-action@v7
