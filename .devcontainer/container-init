@@ -1,0 +1,230 @@
+#!/bin/bash
+# Privileged container setup, run as root via sudo by the entrypoint (or a devcontainer
+# postStartCommand): starts the Docker daemon (DinD), loads the firewall and applies the
+# sudo policy. Runs once per container start; later calls are no-ops, so the agent cannot
+# re-run it with its own environment to change the policy.
+#
+# Settings (passed through sudo via env_keep, see /etc/sudoers.d/container-init):
+#   SKIP_FIREWALL=1          skip the firewall
+#   DIND_ENABLED=0           don't start the Docker daemon (DinD variants, default: 1)
+#   SUDO_ALLOWED_COMMANDS    comma-separated absolute commands node may run without a
+#                            password, or "none" for no commands
+#   SUDO_PASSWORD_HASH       crypt hash (openssl passwd -6); all other commands then
+#                            require this password
+
+set -u
+
+# Never resolve commands from /usr/local/bin, which the node user can write to
+PATH=/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+STATE_DIR=/var/lib/claude-container
+NODE_SUDOERS=/etc/sudoers.d/node
+
+if [[ $EUID -ne 0 ]]; then
+    echo "container-init must run as root (sudo /usr/local/sbin/container-init)" >&2
+    exit 1
+fi
+
+# Container start identity: host boot + PID 1 start time. A restart changes PID 1.
+pid1_stat=$(< /proc/1/stat)
+pid1_stat="${pid1_stat##*) }"
+read -ra pid1_fields <<< "$pid1_stat"
+start_id="$(< /proc/sys/kernel/random/boot_id) ${pid1_fields[19]}"
+if [[ -f "$STATE_DIR/init-done" && "$(< "$STATE_DIR/init-done")" == "$start_id" ]]; then
+    echo "Container already initialized for this start, nothing to do."
+    exit 0
+fi
+mkdir -p "$STATE_DIR"
+echo "$start_id" > "$STATE_DIR/init-done"
+
+# Strip one pair of surrounding quotes: docker run --env-file keeps them literally
+unquote() {
+    local value="$1"
+    if [[ "$value" =~ ^\'(.*)\'$ || "$value" =~ ^\"(.*)\"$ ]]; then
+        value="${BASH_REMATCH[1]}"
+    fi
+    printf '%s' "$value"
+}
+
+ALLOWED_COMMANDS=$(unquote "${SUDO_ALLOWED_COMMANDS:-}")
+PASSWORD_HASH=$(unquote "${SUDO_PASSWORD_HASH:-}")
+
+if [[ -n "$ALLOWED_COMMANDS" || -n "$PASSWORD_HASH" ]]; then
+    SUDO_MODE=restricted
+else
+    SUDO_MODE=full
+fi
+# Read by init-firewall.sh: in restricted mode it ignores whitelists node can modify
+echo "$SUDO_MODE" > "$STATE_DIR/sudo-mode"
+
+EXIT_CODE=0
+
+# ========================================
+# Docker daemon (DinD variants)
+# ========================================
+if command -v dockerd &>/dev/null && [[ "${DIND_ENABLED:-1}" != "0" ]]; then
+    if ! pgrep dockerd > /dev/null; then
+        echo "Starting Docker daemon..."
+        touch /var/log/docker.log
+        chmod 644 /var/log/docker.log
+        setsid dockerd < /dev/null > /var/log/docker.log 2>&1 &
+
+        echo "Waiting for Docker daemon..."
+        timeout=30
+        while ! docker info > /dev/null 2>&1; do
+            sleep 1
+            timeout=$((timeout - 1))
+            if [ $timeout -le 0 ]; then
+                echo "Error: Docker daemon failed to start"
+                cat /var/log/docker.log
+                EXIT_CODE=1
+                break
+            fi
+        done
+        [[ $EXIT_CODE -eq 0 ]] && echo "Docker daemon ready."
+        echo ""
+    fi
+elif command -v dockerd &>/dev/null; then
+    echo "DIND_ENABLED=0, not starting the Docker daemon."
+    echo ""
+fi
+
+# ========================================
+# Firewall
+# ========================================
+if [[ "${SKIP_FIREWALL:-0}" == "1" ]]; then
+    echo "SKIP_FIREWALL=1 detected, skipping firewall initialization."
+    echo ""
+elif command -v iptables &> /dev/null; then
+    echo "Initializing firewall..."
+    if /usr/local/sbin/init-firewall.sh; then
+        echo "Firewall initialized successfully."
+    else
+        echo "Warning: Firewall initialization failed. Continuing without firewall."
+    fi
+    echo ""
+fi
+
+# ========================================
+# Sudo policy
+# ========================================
+
+# True if the node user can modify the path, or any directory leading to it
+node_can_modify() {
+    local path="$1"
+    while true; do
+        runuser -u node -- test -w "$path" && return 0
+        [[ "$path" == "/" ]] && return 1
+        path=$(dirname "$path")
+    done
+}
+
+# Validate one SUDO_ALLOWED_COMMANDS entry and print it as a sudoers command
+sudoers_command() {
+    local entry="$1" cmd real
+    local -a words
+    read -ra words <<< "$entry"
+    cmd="${words[0]}"
+
+    if [[ "$cmd" != /* ]]; then
+        echo "  Warning: skipping '$entry': commands must be absolute paths" >&2
+        return 1
+    fi
+    if [[ ! "$entry" =~ ^[A-Za-z0-9_./+@%\ -]+$ && ! "$entry" =~ ^[A-Za-z0-9_./+@%\ -]+\ \"\"$ ]]; then
+        echo "  Warning: skipping '$entry': only letters, digits, spaces and _./+@%- are allowed (\"\" alone as the last argument)" >&2
+        return 1
+    fi
+    if [[ ! -x "$cmd" || -d "$cmd" ]]; then
+        echo "  Warning: skipping '$entry': $cmd is not an executable file" >&2
+        return 1
+    fi
+    real=$(realpath "$cmd")
+    if node_can_modify "$cmd" || node_can_modify "$real"; then
+        echo "  Warning: skipping '$entry': node can modify $cmd, which would grant root" >&2
+        return 1
+    fi
+    printf '%s' "$entry"
+}
+
+# Install a sudoers file for node after validating it, so a broken file can't lock sudo
+install_sudoers() {
+    local tmp="/etc/sudoers.d/.node.tmp"
+    printf '%s\n' "$1" > "$tmp"
+    chmod 0440 "$tmp"
+    if visudo -cqf "$tmp"; then
+        mv "$tmp" "$NODE_SUDOERS"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+apply_sudo_policy() {
+    local entry cmd hash_ok=1
+    local -a commands=() entries=()
+
+    if [[ -n "$PASSWORD_HASH" ]]; then
+        # yescrypt ($y$, mkpasswd default), SHA-512 ($6$, openssl passwd -6), SHA-256, bcrypt
+        if [[ "$PASSWORD_HASH" =~ ^\$(y|6|5|2[aby])\$[^[:space:]:]+$ ]]; then
+            usermod -p "$PASSWORD_HASH" node
+        else
+            echo "  Error: SUDO_PASSWORD_HASH is not a valid crypt hash (expected \$6\$... from 'openssl passwd -6')."
+            echo "         In compose files and .env, \$ must be escaped (\$\$) or the value single-quoted."
+            echo "         Failing closed: only the allowed commands will work."
+            usermod -p '!' node
+            hash_ok=0
+        fi
+    fi
+
+    if [[ -n "$ALLOWED_COMMANDS" && "$ALLOWED_COMMANDS" != "none" ]]; then
+        IFS=',' read -ra entries <<< "$ALLOWED_COMMANDS"
+        for entry in "${entries[@]}"; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [[ -z "$entry" ]] && continue
+            if cmd=$(sudoers_command "$entry"); then
+                commands+=("$cmd")
+            fi
+        done
+    fi
+
+    # Order matters: sudoers uses the last matching line, so the password rule comes
+    # first and the NOPASSWD lines after it win for the allowed commands.
+    local policy="# Generated by container-init at container start - do not edit
+Defaults:node secure_path=\"/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin\"
+Defaults:node timestamp_timeout=0"
+    if [[ -n "$PASSWORD_HASH" && $hash_ok -eq 1 ]]; then
+        policy+=$'\n'"node ALL=(ALL) ALL"
+    fi
+    policy+=$'\n'"node ALL=(root) NOPASSWD: /usr/local/sbin/container-init \"\", /usr/local/sbin/firewall-status \"\""
+    for cmd in "${commands[@]}"; do
+        policy+=$'\n'"node ALL=(root) NOPASSWD: $cmd"
+    done
+
+    if install_sudoers "$policy"; then
+        echo "Sudo policy: restricted"
+        [[ -n "$PASSWORD_HASH" && $hash_ok -eq 1 ]] && echo "  Other commands require the sudo password"
+        for cmd in "${commands[@]}"; do
+            echo "  Allowed without password: $cmd"
+        done
+    elif install_sudoers "node ALL=(root) NOPASSWD: /usr/local/sbin/container-init \"\""; then
+        echo "  Error: generated sudo policy was invalid, falling back to no sudo access"
+    else
+        rm -f "$NODE_SUDOERS"
+        echo "  Error: could not install a sudo policy, sudo access removed"
+    fi
+
+    # Docker access is root access: the policy can't contain an agent that can run containers
+    if id -nG node | grep -qw docker && [[ -S /var/run/docker.sock ]]; then
+        echo "  Warning: node can use Docker (docker group), which is equivalent to root."
+        echo "           Sudo restrictions are advisory while Docker is available (DIND_ENABLED=0 disables it)."
+    fi
+}
+
+if [[ "$SUDO_MODE" == "restricted" ]]; then
+    apply_sudo_policy
+    echo ""
+fi
+
+exit $EXIT_CODE

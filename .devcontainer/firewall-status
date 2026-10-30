@@ -1,0 +1,8 @@
+#!/bin/bash
+# Show the current firewall rules (read-only). Allowed without a password under
+# every sudo policy, so the rules can always be inspected.
+PATH=/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+iptables -L -n -v
+echo ""
+echo "IPv6:"
+ip6tables -L -n -v 2>/dev/null || echo "  (IPv6 unavailable in kernel)"
