@@ -112,7 +112,7 @@ jobs:
           mkdir -p "${FW_DIR}"
           cat > "${FW_DIR}/allowed-domains.conf" <<'EOF'
           # Test whitelist
-          api.github.com
+          dns.google          # stable IPs (api.github.com returns a different IP per lookup on CI runners)
           1.1.1.1:443         # single IP, port-restricted
           1.0.0.1             # single IP, all ports
           10.99.0.0/16        # subnet
@@ -149,7 +149,7 @@ jobs:
 
               echo "--- Allowed traffic"
               allowed() { curl -sS -o /dev/null --max-time 10 --retry 2 "$1" || fail "$1 should be allowed"; echo "OK: allowed $1"; }
-              allowed https://api.github.com
+              allowed https://dns.google
               allowed https://1.1.1.1
               allowed https://1.0.0.1
               allowed http://1.0.0.1
