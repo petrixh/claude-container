@@ -101,6 +101,75 @@ jobs:
             '
           echo "PASS: Java 25 (Temurin) is installed and on PATH"
 
+      # Test the firewall with a whitelist mounted read-only at /etc/claude-container.
+      # Every "blocked" target would answer if the firewall let it through, so a
+      # refused connection proves the rule works. Runs init-firewall.sh directly
+      # (not via the entrypoint) so the check is isolated to the firewall itself.
+      - name: Test firewall
+        run: |
+          echo "=== Testing firewall (${{ matrix.variant }}) ==="
+          FW_DIR="${RUNNER_TEMP}/firewall-test"
+          mkdir -p "${FW_DIR}"
+          cat > "${FW_DIR}/allowed-domains.conf" <<'EOF'
+          # Test whitelist
+          api.github.com
+          1.1.1.1:443         # single IP, port-restricted
+          1.0.0.1             # single IP, all ports
+          10.99.0.0/16        # subnet
+          10.98.0.0/16:22
+          not a domain
+          2001:db8::1
+          EOF
+          docker run --rm --entrypoint /bin/bash \
+            --cap-add=NET_ADMIN --cap-add=NET_RAW \
+            -v "${FW_DIR}:/etc/claude-container:ro" \
+            claude-container:${{ matrix.variant }}-test -c '
+              set -e
+              fail() { echo "FAIL: $*"; exit 1; }
+
+              out=$(sudo /usr/local/bin/init-firewall.sh) || { echo "$out"; fail "init-firewall.sh exited non-zero"; }
+              echo "$out"
+
+              echo "--- Config and parsing"
+              grep -q "Loading allowed domains from: /etc/claude-container/allowed-domains.conf" <<< "$out" || fail "mounted config not used"
+              grep -q "Skipping '\''10.98.0.0/16:22'\'': port restrictions are not supported for subnets" <<< "$out" || fail "subnet with port not rejected"
+              grep -q "Skipping '\''not a domain'\''" <<< "$out" || fail "invalid line not skipped"
+              grep -q "Skipping '\''2001:db8::1'\'': IPv6 entries are not supported" <<< "$out" || fail "IPv6 entry not skipped"
+              sudo iptables -S OUTPUT | grep -q -- "-d 10.99.0.0/16 -j ACCEPT" || fail "subnet rule missing"
+
+              echo "--- Self-check"
+              grep -q "OK: non-whitelisted IP rejected" <<< "$out" || fail "self-check: non-whitelisted IP not rejected"
+              grep -q "OK: whitelisted domain reachable" <<< "$out" || fail "self-check: whitelisted domain not reachable"
+
+              echo "--- Reload is idempotent"
+              before=$(sudo iptables -S OUTPUT | wc -l)
+              sudo /usr/local/bin/init-firewall.sh > /dev/null
+              after=$(sudo iptables -S OUTPUT | wc -l)
+              [ "$before" = "$after" ] || fail "rule count changed on reload ($before -> $after)"
+
+              echo "--- Allowed traffic"
+              allowed() { curl -sS -o /dev/null --max-time 10 --retry 2 "$1" || fail "$1 should be allowed"; echo "OK: allowed $1"; }
+              allowed https://api.github.com
+              allowed https://1.1.1.1
+              allowed https://1.0.0.1
+              allowed http://1.0.0.1
+
+              echo "--- Blocked traffic (rejected locally, curl exit 7)"
+              blocked() {
+                rc=0; curl -sS -o /dev/null --max-time 10 "$1" 2>/dev/null || rc=$?
+                [ "$rc" = 7 ] || fail "$1 should be rejected (curl exit $rc, expected 7)"
+                echo "OK: rejected $1"
+              }
+              blocked http://1.1.1.1
+              blocked https://9.9.9.9
+              blocked https://example.com
+
+              echo "--- IPv6"
+              sudo ip6tables -S OUTPUT | grep -q -- "-P OUTPUT DROP" || fail "IPv6 OUTPUT policy is not DROP"
+              sudo ip6tables -S OUTPUT | grep -q -- "-A OUTPUT -o lo -j ACCEPT" || fail "IPv6 loopback not allowed"
+            '
+          echo "PASS: firewall whitelist, port rules, REJECT and IPv6 block work"
+
       # Test Playwright (base + opencode share the playwright layer)
       - name: Test Playwright installation
         if: matrix.variant == 'base' || matrix.variant == 'opencode'
