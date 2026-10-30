@@ -58,19 +58,11 @@ if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
     echo "Git user.email configured: ${GIT_USER_EMAIL}"
 fi
 
-# Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)
-# This requires NET_ADMIN capability to be set
-if [[ "${SKIP_FIREWALL:-0}" == "1" ]]; then
-    echo "SKIP_FIREWALL=1 detected, skipping firewall initialization."
-    echo ""
-elif command -v iptables &> /dev/null; then
-    echo "Initializing firewall..."
-    if sudo /usr/local/bin/init-firewall.sh; then
-        echo "Firewall initialized successfully."
-    else
-        echo "Warning: Firewall initialization failed. Continuing without firewall."
-    fi
-    echo ""
+# Privileged setup: Docker daemon (DinD), firewall (needs NET_ADMIN) and sudo policy.
+# Runs once per container start; re-running this entrypoint skips it.
+if ! sudo -n /usr/local/sbin/container-init; then
+    echo "Error: container initialization failed."
+    exit 1
 fi
 
 # Show Chrome DevTools remote debugging hint.

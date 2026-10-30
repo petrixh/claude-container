@@ -119,6 +119,15 @@ RUN chown -R node:node /usr/local/lib/node_modules \
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/node \
     && chmod 0440 /etc/sudoers.d/node
 
+# Scripts that run as root live in /usr/local/sbin: /usr/local/bin is writable by
+# node (see above), so anything root runs from there could be replaced by the agent.
+# container-init narrows the sudo access above at container start if SUDO_* is set.
+COPY sudoers-container-init /etc/sudoers.d/container-init
+RUN chmod 0440 /etc/sudoers.d/container-init \
+    && mkdir -p /usr/local/sbin /usr/local/etc /var/lib/claude-container \
+    && chown root:root /usr/local/sbin /usr/local/etc /var/lib/claude-container \
+    && chmod 0755 /usr/local/sbin /usr/local/etc /var/lib/claude-container
+
 # Create directories for the node user
 RUN mkdir -p /home/node/.claude /home/node/.config/gh /commandhistory \
     && chown -R node:node /home/node /commandhistory
@@ -137,8 +146,8 @@ RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master
 
 # Configure zsh with useful aliases
 RUN echo '\n# Claude Code aliases' >> /home/node/.zshrc \
-    && echo 'alias firewall-reload="sudo /usr/local/bin/init-firewall.sh"' >> /home/node/.zshrc \
-    && echo 'alias firewall-status="sudo iptables -L -n -v"' >> /home/node/.zshrc \
+    && echo 'alias firewall-reload="sudo /usr/local/sbin/init-firewall.sh"' >> /home/node/.zshrc \
+    && echo 'alias firewall-status="sudo /usr/local/sbin/firewall-status"' >> /home/node/.zshrc \
     && echo 'alias playwright-info="playwright-info"' >> /home/node/.zshrc \
     && echo '\n# History settings for persistent history' >> /home/node/.zshrc \
     && echo 'HISTFILE=/commandhistory/.zsh_history' >> /home/node/.zshrc \
@@ -169,12 +178,16 @@ RUN if [ "${CLAUDE_CODE_VERSION}" = "latest" ]; then \
     fi \
     && ln -sf /home/node/.local/bin/claude /usr/local/bin/claude
 
-# Copy firewall, entrypoint, and helper scripts
-COPY init-firewall.sh /usr/local/bin/init-firewall.sh
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# Copy firewall, entrypoint, and helper scripts. Root-run scripts go to the
+# root-owned /usr/local/sbin; the /usr/local/bin links keep the old paths working.
+COPY init-firewall.sh container-init firewall-status entrypoint.sh /usr/local/sbin/
 COPY playwright-info.sh /usr/local/bin/playwright-info
 COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/playwright-info
+RUN chmod 0755 /usr/local/sbin/init-firewall.sh /usr/local/sbin/container-init \
+               /usr/local/sbin/firewall-status /usr/local/sbin/entrypoint.sh \
+    && chmod +x /usr/local/bin/playwright-info \
+    && ln -sf /usr/local/sbin/init-firewall.sh /usr/local/bin/init-firewall.sh \
+    && ln -sf /usr/local/sbin/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Set working directory and ensure node user owns it
 RUN mkdir -p /workspace && chown node:node /workspace
@@ -184,7 +197,7 @@ WORKDIR /workspace
 USER node
 
 # Set entrypoint and default command
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/sbin/entrypoint.sh"]
 CMD ["/bin/zsh"]
 
 # ========================================
@@ -209,12 +222,17 @@ RUN if [ "${OPENCODE_VERSION}" = "latest" ]; then \
     fi \
     && ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode
 
-# Copy firewall, entrypoint, and helper scripts
-COPY init-firewall.sh /usr/local/bin/init-firewall.sh
-COPY entrypoint-opencode.sh /usr/local/bin/entrypoint.sh
+# Copy firewall, entrypoint, and helper scripts. Root-run scripts go to the
+# root-owned /usr/local/sbin; the /usr/local/bin links keep the old paths working.
+COPY init-firewall.sh container-init firewall-status /usr/local/sbin/
+COPY entrypoint-opencode.sh /usr/local/sbin/entrypoint.sh
 COPY playwright-info.sh /usr/local/bin/playwright-info
 COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/playwright-info
+RUN chmod 0755 /usr/local/sbin/init-firewall.sh /usr/local/sbin/container-init \
+               /usr/local/sbin/firewall-status /usr/local/sbin/entrypoint.sh \
+    && chmod +x /usr/local/bin/playwright-info \
+    && ln -sf /usr/local/sbin/init-firewall.sh /usr/local/bin/init-firewall.sh \
+    && ln -sf /usr/local/sbin/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Set working directory and ensure node user owns it
 RUN mkdir -p /workspace && chown node:node /workspace
@@ -224,7 +242,7 @@ WORKDIR /workspace
 USER node
 
 # Set entrypoint and default command
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/sbin/entrypoint.sh"]
 CMD ["/bin/zsh"]
 
 # ========================================
@@ -241,32 +259,27 @@ RUN chmod +x /usr/local/bin/install-docker.sh && /usr/local/bin/install-docker.s
 # Add node user to docker group
 RUN usermod -aG docker node
 
-# Copy scripts (including the DinD entrypoint)
-COPY init-firewall.sh /usr/local/bin/init-firewall.sh
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
-COPY playwright-info.sh /usr/local/bin/playwright-info
-COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
-RUN chmod +x /usr/local/bin/init-firewall.sh \
-             /usr/local/bin/entrypoint.sh \
-             /usr/local/bin/entrypoint-dind.sh \
-             /usr/local/bin/playwright-info
+# Copy the DinD entrypoint (other scripts were installed by the base stage).
+# container-init starts the Docker daemon unless DIND_ENABLED=0.
+COPY entrypoint-dind.sh /usr/local/sbin/entrypoint-dind.sh
+RUN chmod 0755 /usr/local/sbin/entrypoint-dind.sh \
+    && ln -sf /usr/local/sbin/entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
 
 # Set working directory and ensure node user owns it
 RUN mkdir -p /workspace && chown node:node /workspace
 WORKDIR /workspace
 USER node
 
-ENTRYPOINT ["/usr/local/bin/entrypoint-dind.sh"]
+ENTRYPOINT ["/usr/local/sbin/entrypoint-dind.sh"]
 CMD ["/bin/zsh"]
 
 # ========================================
 # OPENCODE-DIND STAGE (OpenCode + Docker-in-Docker)
 # ========================================
 # Same Docker-in-Docker setup as the `dind` stage, but on top of the OpenCode
-# agent instead of Claude Code. The DinD entrypoint is agent-agnostic: it starts
-# dockerd, then execs /usr/local/bin/entrypoint.sh — which the opencode stage
-# already installed as the OpenCode entrypoint.
+# agent instead of Claude Code. The DinD entrypoint is agent-agnostic: it execs
+# /usr/local/sbin/entrypoint.sh — which the opencode stage already installed as
+# the OpenCode entrypoint — and container-init starts dockerd.
 FROM opencode AS opencode-dind
 
 USER root
@@ -279,12 +292,13 @@ RUN chmod +x /usr/local/bin/install-docker.sh && /usr/local/bin/install-docker.s
 RUN usermod -aG docker node
 
 # Copy the DinD entrypoint (other scripts were installed by the opencode stage,
-# whose entrypoint-opencode.sh already lives at /usr/local/bin/entrypoint.sh).
-COPY entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
-RUN chmod +x /usr/local/bin/entrypoint-dind.sh
+# whose entrypoint-opencode.sh already lives at /usr/local/sbin/entrypoint.sh).
+COPY entrypoint-dind.sh /usr/local/sbin/entrypoint-dind.sh
+RUN chmod 0755 /usr/local/sbin/entrypoint-dind.sh \
+    && ln -sf /usr/local/sbin/entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
 
 WORKDIR /workspace
 USER node
 
-ENTRYPOINT ["/usr/local/bin/entrypoint-dind.sh"]
+ENTRYPOINT ["/usr/local/sbin/entrypoint-dind.sh"]
 CMD ["/bin/zsh"]

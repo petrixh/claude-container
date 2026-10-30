@@ -14,17 +14,38 @@
 
 set -e
 
+# Never resolve commands from /usr/local/bin, which the node user can write to
+PATH=/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 MOUNTED_CONFIG="/etc/claude-container/allowed-domains.conf"
 WORKSPACE_CONFIG="/workspace/.devcontainer/allowed-domains.conf"
 FALLBACK_CONFIG="/usr/local/etc/allowed-domains.conf"
 
-# Lookup order: FIREWALL_CONFIG, read-only mount from the host, workspace, baked-in default
+# Written by container-init. With restricted sudo, a whitelist the node user can
+# modify would let the agent open the firewall, so such files are ignored.
+SUDO_MODE=$(cat /var/lib/claude-container/sudo-mode 2>/dev/null || echo full)
+
+# True if the node user can modify the path, or any directory leading to it
+node_can_modify() {
+    local path="$1"
+    while true; do
+        runuser -u node -- test -w "$path" && return 0
+        [[ "$path" == "/" ]] && return 1
+        path=$(dirname "$path")
+    done
+}
+
+# Lookup order: read-only mount from the host, workspace, baked-in default
 CONFIG_FILE=""
-for candidate in "${FIREWALL_CONFIG:-}" "$MOUNTED_CONFIG" "$WORKSPACE_CONFIG" "$FALLBACK_CONFIG"; do
-    if [[ -n "$candidate" && -f "$candidate" ]]; then
-        CONFIG_FILE="$candidate"
-        break
+for candidate in "$MOUNTED_CONFIG" "$WORKSPACE_CONFIG" "$FALLBACK_CONFIG"; do
+    [[ -f "$candidate" ]] || continue
+    if [[ "$SUDO_MODE" == "restricted" ]] && { node_can_modify "$candidate" || node_can_modify "$(realpath "$candidate")"; }; then
+        echo "Ignoring $candidate: writable by node (sudo is restricted, mount the whitelist read-only)"
+        continue
     fi
+    CONFIG_FILE="$candidate"
+    break
 done
 
 if [[ -z "$CONFIG_FILE" ]]; then
@@ -260,4 +281,4 @@ fi
 echo ""
 echo "To add new domains:"
 echo "  1. Edit $CONFIG_FILE"
-echo "  2. Run: firewall-reload (or: sudo /usr/local/bin/init-firewall.sh)"
+echo "  2. Run: firewall-reload (or: sudo /usr/local/sbin/init-firewall.sh)"

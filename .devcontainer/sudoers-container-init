@@ -1,0 +1,3 @@
+# container-init reads its settings from these variables. It runs only once per
+# container start, so passing them later has no effect.
+Defaults!/usr/local/sbin/container-init env_keep += "SKIP_FIREWALL DIND_ENABLED SUDO_ALLOWED_COMMANDS SUDO_PASSWORD_HASH"

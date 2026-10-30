@@ -127,7 +127,7 @@ jobs:
               set -e
               fail() { echo "FAIL: $*"; exit 1; }
 
-              out=$(sudo /usr/local/bin/init-firewall.sh) || { echo "$out"; fail "init-firewall.sh exited non-zero"; }
+              out=$(sudo /usr/local/sbin/init-firewall.sh) || { echo "$out"; fail "init-firewall.sh exited non-zero"; }
               echo "$out"
 
               echo "--- Config and parsing"
@@ -143,7 +143,7 @@ jobs:
 
               echo "--- Reload is idempotent"
               before=$(sudo iptables -S OUTPUT | wc -l)
-              sudo /usr/local/bin/init-firewall.sh > /dev/null
+              sudo /usr/local/sbin/init-firewall.sh > /dev/null
               after=$(sudo iptables -S OUTPUT | wc -l)
               [ "$before" = "$after" ] || fail "rule count changed on reload ($before -> $after)"
 
@@ -169,6 +169,55 @@ jobs:
               sudo ip6tables -S OUTPUT | grep -q -- "-A OUTPUT -o lo -j ACCEPT" || fail "IPv6 loopback not allowed"
             '
           echo "PASS: firewall whitelist, port rules, REJECT and IPv6 block work"
+
+      # Test the sudo policy (SUDO_ALLOWED_COMMANDS / SUDO_PASSWORD_HASH) through the
+      # real entrypoint. DIND_ENABLED=0 keeps the DinD variants from starting dockerd,
+      # which can't run nested on the runner without the vfs workaround below.
+      - name: Test sudo policy
+        run: |
+          echo "=== Testing sudo policy (${{ matrix.variant }}) ==="
+          IMAGE=claude-container:${{ matrix.variant }}-test
+
+          echo "--- Default: passwordless sudo"
+          docker run --rm -e SKIP_FIREWALL=1 -e DIND_ENABLED=0 "$IMAGE" \
+            bash -c 'sudo -n true && grep -qx full /var/lib/claude-container/sudo-mode'
+
+          echo "--- Restricted: allowlist + password (hash quoted as in an env file)"
+          HASH=$(openssl passwd -6 -salt citest testpass)
+          out=$(docker run --rm -e SKIP_FIREWALL=1 -e DIND_ENABLED=0 \
+            -e SUDO_ALLOWED_COMMANDS="/usr/bin/id, /usr/local/bin/init-firewall.sh" \
+            -e SUDO_PASSWORD_HASH="'${HASH}'" \
+            "$IMAGE" bash -c '
+              fail() { echo "FAIL: $*"; exit 1; }
+              [ "$(sudo -n /usr/bin/id -u)" = 0 ] || fail "allowed command should run as root without a password"
+              sudo -n true 2>/dev/null && fail "other commands should require a password"
+              echo wrongpass | sudo -S -p "" true 2>/dev/null && fail "wrong password accepted"
+              echo testpass | sudo -S -p "" true || fail "correct password rejected"
+              sudo -n /usr/local/bin/init-firewall.sh 2>/dev/null && fail "node-writable path should not be allowed"
+              sudo -n -l /usr/local/sbin/firewall-status >/dev/null || fail "firewall-status should always be allowed"
+              SUDO_ALLOWED_COMMANDS=/usr/bin/whoami sudo -n /usr/local/sbin/container-init | grep -q "already initialized" \
+                || fail "container-init re-run should be a no-op"
+              sudo -n /usr/bin/whoami 2>/dev/null && fail "policy changed by re-running container-init"
+              for f in /usr/local/sbin /usr/local/sbin/container-init /usr/local/sbin/init-firewall.sh \
+                       /usr/local/sbin/entrypoint.sh /etc/sudoers.d /var/lib/claude-container; do
+                [ -w "$f" ] && fail "$f is writable by node"
+              done
+              echo "ALL CHECKS PASSED"
+            ' 2>&1) || true
+          echo "$out"
+          grep -q "ALL CHECKS PASSED" <<< "$out" || { echo "FAIL: restricted sudo checks"; exit 1; }
+          grep -q "node can modify /usr/local/bin/init-firewall.sh" <<< "$out" \
+            || { echo "FAIL: node-writable command was not reported"; exit 1; }
+
+          if [[ "${{ matrix.variant }}" == *dind ]]; then
+            echo "--- DIND_ENABLED=0 does not start the Docker daemon"
+            out=$(docker run --rm -e SKIP_FIREWALL=1 -e DIND_ENABLED=0 "$IMAGE" \
+              bash -c 'pgrep dockerd && echo "FAIL: dockerd running" || echo "dockerd not running"' 2>&1)
+            echo "$out"
+            grep -q "DIND_ENABLED=0, not starting the Docker daemon" <<< "$out" && grep -q "^dockerd not running" <<< "$out" \
+              || { echo "FAIL: DIND_ENABLED=0 not honored"; exit 1; }
+          fi
+          echo "PASS: sudo policy is applied, enforced and can't be changed by the agent"
 
       # Test Playwright (base + opencode share the playwright layer)
       - name: Test Playwright installation

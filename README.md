@@ -152,7 +152,8 @@ then create a deccontainer file under `.devcontainer/devcontainer.json` with the
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
-  "postStartCommand": "/usr/local/bin/entrypoint.sh"
+  "waitFor": "postStartCommand",
+  "postStartCommand": "/usr/local/sbin/entrypoint.sh"
 }
 ```
 
@@ -657,10 +658,11 @@ Domains are resolved once, when the firewall loads. If a domain's IPs change (co
 
 The firewall uses the first whitelist it finds:
 
-1. `$FIREWALL_CONFIG`, if set (only when `init-firewall.sh` runs as root directly: `sudo`, used by the entrypoint and `firewall-reload`, drops this variable, so prefer the mount below)
-2. `/etc/claude-container/allowed-domains.conf` (read-only mount from the host, recommended)
-3. `/workspace/.devcontainer/allowed-domains.conf`
-4. `/usr/local/etc/allowed-domains.conf` (baked-in default)
+1. `/etc/claude-container/allowed-domains.conf` (read-only mount from the host, recommended)
+2. `/workspace/.devcontainer/allowed-domains.conf` (ignored when [sudo is restricted](#sudo-policy): the agent can edit it)
+3. `/usr/local/etc/allowed-domains.conf` (baked-in default)
+
+When sudo is restricted, any whitelist the `node` user can modify is ignored, so mount yours read-only.
 
 To use your own whitelist, keep it in a directory on the host and bind mount the **directory** read-only:
 
@@ -692,6 +694,34 @@ firewall-status
 firewall-reload
 ```
 
+`firewall-status` works under every sudo policy. `firewall-reload` follows the [sudo policy](#sudo-policy): with the default passwordless sudo the agent can reload too; with a password set it needs the password (a human); with an allowlist it works only if `/usr/local/sbin/init-firewall.sh` is listed.
+
+## Sudo Policy
+
+By default the `node` user, and therefore the agent, has passwordless sudo for everything, so it could also turn the firewall off. Two environment variables restrict that:
+
+| `SUDO_ALLOWED_COMMANDS` | `SUDO_PASSWORD_HASH` | Result |
+|---|---|---|
+| unset | unset | Passwordless sudo for everything (default) |
+| set | unset | Only the listed commands, no password; everything else denied |
+| unset | set | Every command requires the password |
+| set | set | Listed commands without password, everything else requires the password |
+
+- **`SUDO_ALLOWED_COMMANDS`**: comma-separated absolute paths, optionally with arguments (a trailing `""` forbids any arguments), e.g. `/usr/local/sbin/init-firewall.sh, /usr/bin/stat ""`. `none` allows no commands. Commands the `node` user can modify (anything in `/usr/local/bin` or the home directory) are refused with a warning, because allowing them would grant root. Also avoid commands that can start a shell or write files as root (`apt-get`, `vim`, `less`, `find`, `tee`, `cp`, `npm`, `docker`, ...): allowing one of them is the same as allowing everything.
+- **`SUDO_PASSWORD_HASH`**: the hash of a password you choose, never the password itself. Generate it with `openssl passwd -6` (prompts for the password, prints `$6$...`). In a compose `.env` file, wrap it in single quotes, otherwise compose treats the `$` signs as variables. An invalid hash fails closed: only the allowed commands work. The password is never cached (`timestamp_timeout=0`), so an agent can't reuse a password you just typed.
+
+How it works:
+
+- At container start, `container-init` (run as root by the entrypoint, or by `postStartCommand` in the dev containers) starts the Docker daemon (DinD), loads the firewall, then installs the sudo policy as its last step. It runs once per container start: calling it again later does nothing, so the agent can't re-run it with its own settings.
+- Scripts that run as root live in the root-owned `/usr/local/sbin`. `/usr/local/bin` is writable by `node`, so the old paths there are only links kept for compatibility. Point your own configs at `/usr/local/sbin/...`.
+- `firewall-status` and `container-init` are always allowed without a password.
+- Settings apply at container start. Changing them requires recreating the container.
+
+Limits:
+
+- **Docker access is root access.** In the DinD variants `node` is in the `docker` group and can run privileged containers. Set `DIND_ENABLED=0` to not start the Docker daemon. In the `claude-docker-host` variant the host's Docker socket is mounted, which is root on the host.
+- **The container configuration itself.** If your `devcontainer.json` or `.env` lives inside the workspace, the agent can edit it, and the changes apply on the next rebuild. Keep them outside the workspace, or review changes to them.
+
 ## Environment Variables
 
 | Variable | Description |
@@ -703,7 +733,9 @@ firewall-reload
 | `TZ` | Timezone (default: `Europe/Helsinki`). Pass `-e TZ=$TZ` to inherit from host |
 | `CLAUDE_CODE_VERSION` | Claude Code version to install (default: `latest`) |
 | `SKIP_FIREWALL` | Set to `1` to skip firewall initialization (useful for DinD troubleshooting) |
-| `FIREWALL_CONFIG` | Custom path to allowed-domains.conf (see [lookup order](#customizing-the-domain-whitelist)) |
+| `SUDO_ALLOWED_COMMANDS` | Commands `node` may run with sudo without a password, or `none` (see [Sudo Policy](#sudo-policy)) |
+| `SUDO_PASSWORD_HASH` | Hash from `openssl passwd -6`; all other sudo commands then require that password (see [Sudo Policy](#sudo-policy)) |
+| `DIND_ENABLED` | DinD variants: set to `0` to not start the Docker daemon (default: `1`) |
 | `DOCKER_HOST` | Docker daemon socket (default: `unix:///var/run/docker.sock`) |
 | `PLAYWRIGHT_BROWSERS_PATH` | Path to pre-installed Playwright browsers (default: `/opt/playwright-browsers`) |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
