@@ -224,7 +224,7 @@ A Docker devcontainer for running Claude Code in a sandboxed environment with:
 - Java 25 (Eclipse Temurin)
 - Playwright with headless Chromium (arm64/amd64)
 - GitHub CLI with PAT authentication
-- Domain-whitelist firewall (default deny)
+- Whitelist firewall for domains, IPs and subnets (default deny, IPv6 blocked)
 - Configurable Claude config directory for subscription authentication
 - Optional Docker-in-Docker (DinD) support for containerized development
 
@@ -620,7 +620,28 @@ docker run myapp:latest
 
 ## Firewall Configuration
 
-The container uses a domain-whitelist firewall that blocks all outbound traffic except to approved domains. A default whitelist is baked into the image at `/usr/local/etc/allowed-domains.conf`.
+The container uses a whitelist firewall that blocks all outbound traffic except to approved domains, IPs and subnets. A default whitelist is baked into the image at `/usr/local/etc/allowed-domains.conf`.
+
+- Blocked connections are rejected immediately (no hanging until a timeout).
+- All outbound IPv6 traffic is blocked, except loopback.
+- After loading, a self-check verifies that a non-whitelisted IP is rejected and a whitelisted domain is reachable. Failures are printed as warnings; startup continues.
+
+### Whitelist Entry Format
+
+One entry per line; `#` starts a comment (whole line or after an entry):
+
+| Entry | Allows |
+|-------|--------|
+| `github.com` | TCP 80 and 443 to the domain's resolved IPs |
+| `github.com:22` | Only TCP 22 (ports replace the 80/443 default) |
+| `github.com:22,80,443` | A comma-separated list of TCP ports |
+| `192.168.1.123` | All ports and protocols to that IP |
+| `192.168.1.123:8080` | Only TCP 8080 (comma-separated lists work here too) |
+| `192.168.1.0/24` | The whole subnet, all ports (ports are not supported for subnets) |
+
+Rules add up: listing both `github.com` and `github.com:22` allows 22, 80 and 443. Invalid lines and IPv6 entries are skipped with a warning.
+
+Domains are resolved once, when the firewall loads. If a domain's IPs change (common with CDNs), run `firewall-reload`.
 
 ### Default Allowed Domains
 
@@ -634,27 +655,30 @@ The container uses a domain-whitelist firewall that blocks all outbound traffic 
 
 ### Customizing the Domain Whitelist
 
-To use your own domain whitelist, bind mount a custom config file:
+The firewall uses the first whitelist it finds:
+
+1. `$FIREWALL_CONFIG`, if set (only when `init-firewall.sh` runs as root directly: `sudo`, used by the entrypoint and `firewall-reload`, drops this variable, so prefer the mount below)
+2. `/etc/claude-container/allowed-domains.conf` (read-only mount from the host, recommended)
+3. `/workspace/.devcontainer/allowed-domains.conf`
+4. `/usr/local/etc/allowed-domains.conf` (baked-in default)
+
+To use your own whitelist, keep it in a directory on the host and bind mount the **directory** read-only:
 
 ```bash
+# Copy the default config from this repo
+mkdir -p ~/.config/claude-container
+cp .devcontainer/allowed-domains.conf ~/.config/claude-container/
+
 docker run -it --rm \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
-  -v "/path/to/your/allowed-domains.conf:/usr/local/etc/allowed-domains.conf:ro" \
+  -v "$HOME/.config/claude-container:/etc/claude-container:ro" \
   -v "/path/to/claude-container-config:/claude-container-config" \
   -e CLAUDE_CONFIG_DIR="/claude-container-config" \
   claude-container
 ```
 
-Or copy the default config and modify it:
-
-```bash
-# Copy from this repo
-cp .devcontainer/allowed-domains.conf ~/my-allowed-domains.conf
-
-# Edit to add your domains
-echo "example.com" >> ~/my-allowed-domains.conf
-```
+Edit the file on the host, then run `firewall-reload` inside the container. Mount the directory rather than the single file: most editors save by writing a new file and renaming it, and a single-file bind mount keeps showing the old version until the container restarts.
 
 ### Runtime Firewall Commands
 
@@ -679,7 +703,7 @@ firewall-reload
 | `TZ` | Timezone (default: `Europe/Helsinki`). Pass `-e TZ=$TZ` to inherit from host |
 | `CLAUDE_CODE_VERSION` | Claude Code version to install (default: `latest`) |
 | `SKIP_FIREWALL` | Set to `1` to skip firewall initialization (useful for DinD troubleshooting) |
-| `FIREWALL_CONFIG` | Custom path to allowed-domains.conf (default: workspace or `/usr/local/etc`) |
+| `FIREWALL_CONFIG` | Custom path to allowed-domains.conf (see [lookup order](#customizing-the-domain-whitelist)) |
 | `DOCKER_HOST` | Docker daemon socket (default: `unix:///var/run/docker.sock`) |
 | `PLAYWRIGHT_BROWSERS_PATH` | Path to pre-installed Playwright browsers (default: `/opt/playwright-browsers`) |
 | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` | Set to `1` to skip browser downloads (default: `1`, browsers are pre-installed) |
