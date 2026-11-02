@@ -213,6 +213,119 @@ After starting the devconatiner in VS Code use the command palette (top center) 
  
 To keep your devcontainer and workspace permananently separate change the `workspaceMount` entry, use: `-v "${localWorkspaceFolder}/workspace/:/workspace" ` for the bind mount instead. 
 
+# TL;DR - OpenCode instead of Claude Code
+
+Same setup as above with the `-opencode` image (`-opencode-dind` if you want Docker inside). What differs:
+
+* No `dot-claude` folder. OpenCode V2 keeps **everything** (config, sessions, credentials, cache) in a `.opencode` folder inside whatever you mount at `/workspace`:
+
+  | On the host               | In the container           | What's in it                          |
+  | ------------------------- | -------------------------- | ------------------------------------- |
+  | `<workspace>/.opencode/config/` | `~/.config/opencode`  | `opencode.json` (your global config)  |
+  | `<workspace>/.opencode/data/`   | `~/.local/share/opencode` | `opencode.db` = sessions **and credentials**, logs |
+  | `<workspace>/.opencode/state/`  | `~/.local/state/opencode` | background server info           |
+  | `<workspace>/.opencode/cache/`  | `~/.cache/opencode`   | downloaded tools and packages         |
+
+  The container creates these folders when `opencode` first runs.
+* `.env`: use the same file as above but drop `CLAUDE_CONFIG_DIR` and `NOTIFICATION_URL` (Claude only; no OpenCode notifications yet). The OpenCode-only options are at the bottom of [`.env.example`](.env.example).
+
+**Docker run:**
+
+```
+mkdir -p opencode-instance/workspace/.opencode/config opencode-instance/m2-cache
+cd opencode-instance
+nano .env   # see above
+
+docker run -it --rm \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  --env-file .env \
+  -v "./m2-cache:/home/node/.m2" \
+  -v "./workspace:/workspace" \
+  -p 9222:9222 \
+  ghcr.io/petrixh/claude-container-opencode:latest
+```
+
+Clone your project under `/workspace`, `cd` into it, run `opencode` and use `/connect` to log in to a provider.
+
+**Devcontainer** (`.devcontainer/devcontainer.json` in your project):
+
+```
+{
+  "name": "OpenCode Sandbox",
+  "image": "ghcr.io/petrixh/claude-container-opencode:latest",
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
+    "--env-file=.devcontainer/.env"
+  ],
+  "remoteUser": "node",
+  "mounts": [
+    "source=${localWorkspaceFolder}/m2-cache,target=/home/node/.m2,type=bind,consistency=cached"
+  ],
+  "forwardPorts": [9222],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "postStartCommand": "/usr/local/bin/entrypoint.sh"
+}
+```
+
+Here `.opencode` ends up in your project root, so **gitignore the runtime folders right away**, since `data/` holds your credentials. Don't ignore all of `.opencode/`: the folder also holds project config (`opencode.json`, `agents/`, `commands/`, `skills/`) you may want to commit.
+
+```
+cat >> .gitignore <<'GITIGNORE'
+.devcontainer/.env
+m2-cache/
+.opencode/config/
+.opencode/data/
+.opencode/state/
+.opencode/cache/
+GITIGNORE
+```
+
+**Config** goes in `.opencode/config/opencode.json` (the V2 format, which differs from V1). A starting point with the Vaadin docs MCP:
+
+```
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "vaadin": {
+        "type": "remote",
+        "url": "https://mcp.vaadin.com/docs",
+        "oauth": false
+      }
+    }
+  }
+}
+```
+
+Bring your own model (an OpenAI-compatible endpoint) by adding a `providers` block next to `mcp`. Spell out `limit` and `capabilities`: the firewall blocks the model catalog, so OpenCode can't look them up (see [Custom models need explicit limits](#custom-models-need-explicit-limits)):
+
+```
+  "providers": {
+    "acme": {
+      "name": "Acme",
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": { "baseURL": "https://llm.example.com/v1", "apiKey": "{env:ACME_API_KEY}" },
+      "models": {
+        "acme-1": {
+          "modelID": "acme-1",
+          "capabilities": { "tools": true, "input": ["text", "image"], "output": ["text"] },
+          "limit": { "context": 128000, "output": 8192 }
+        }
+      }
+    }
+  }
+```
+
+Then pick it with `/models` in OpenCode, set `"model": "acme/acme-1"` at the top level of `opencode.json`, or use `opencode run -m acme/acme-1 "..."`. Check what OpenCode actually loaded with `opencode debug config`, `opencode mcp list` and `opencode models`.
+
+Notes:
+* **No Playwright MCP needed.** The Playwright Agent CLI skill is pre-installed and OpenCode picks it up automatically.
+* **Firewall on?** Remote MCP servers and custom provider hosts need to be in `allowed-domains.conf` (e.g. `mcp.vaadin.com`, `llm.example.com`). See [Customizing the Domain Whitelist](#customizing-the-domain-whitelist).
+* **Coming from a V1 config?** `provider` → `providers`, `mcp.<name>` → `mcp.servers.<name>`, `enabled` → `disabled`, `npm` → `package`, `options` → `settings`. Details are in [`OPENCODE_V2_UPGRADE.md`](OPENCODE_V2_UPGRADE.md) §6.
+
 # The not TL;DR version
 
 Below is a more compehensive example with instructions etc... Reading through them can give you insight into the whats and the whys... 
