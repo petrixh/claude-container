@@ -206,8 +206,9 @@ ENV OPENCODE_DISABLE_AUTOUPDATE=1
 USER root
 
 # Install OpenCode via the official bash installer.
-# Runs as `node` so the binary lands in /home/node/.opencode/bin/opencode,
-# then symlinked into /usr/local/bin for system-wide PATH availability.
+# Runs as `node` so the binary lands in /home/node/.opencode/bin/opencode.
+# /usr/local/bin/opencode is a launcher script (opencode-launcher.sh, copied
+# below) that puts it on PATH for every user and shell.
 # Tar is already provided by the node:trixie base image.
 #
 # "latest" is resolved explicitly against the update API rather than left to the
@@ -215,7 +216,7 @@ USER root
 # built an old release; the current script reads `latest` itself, but resolving
 # here keeps that from regressing and logs the exact version baked in.
 #
-# --no-modify-path suppresses the installer's .zshrc PATH edit. The symlink in
+# --no-modify-path suppresses the installer's .zshrc PATH edit. The launcher in
 # /usr/local/bin is what puts opencode on PATH for every user and shell.
 RUN set -eu; \
     if [ "${OPENCODE_CHANNEL}" = "v2" ]; then \
@@ -238,16 +239,17 @@ RUN set -eu; \
       su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --no-modify-path"; \
     else \
       su - node -c "curl -fsSL ${INSTALL_URL} | bash -s -- --no-modify-path --version ${VERSION}"; \
-    fi; \
-    ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode
+    fi
 
 # Consolidate OpenCode's four XDG directories into a single .opencode folder in
 # the mounted project, so sessions, credentials and config travel with the code
 # and survive `docker system prune` and container rebuilds.
 #
-# The link targets are created by the entrypoint, not here: /workspace is a mount
-# point, so anything written to it at build time is shadowed once the bind mount
-# lands. The symlinks are dangling in the image by design.
+# The link targets are not created here: /workspace is a mount point, so anything
+# written to it at build time is shadowed once the bind mount lands. The symlinks
+# are dangling in the image by design. The opencode launcher creates the targets
+# on every launch (the entrypoint alone is not enough: dev containers and
+# `docker run --entrypoint` skip it).
 RUN su - node -c 'set -eu; \
       rm -rf ~/.config/opencode ~/.local/share/opencode ~/.local/state/opencode ~/.cache/opencode; \
       mkdir -p ~/.config ~/.local/share ~/.local/state ~/.cache; \
@@ -259,9 +261,11 @@ RUN su - node -c 'set -eu; \
 # Copy firewall, entrypoint, and helper scripts
 COPY init-firewall.sh /usr/local/bin/init-firewall.sh
 COPY entrypoint-opencode.sh /usr/local/bin/entrypoint.sh
+COPY opencode-launcher.sh /usr/local/bin/opencode
 COPY playwright-info.sh /usr/local/bin/playwright-info
 COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/playwright-info
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh \
+             /usr/local/bin/opencode /usr/local/bin/playwright-info
 
 # Set working directory and ensure node user owns it
 RUN mkdir -p /workspace && chown node:node /workspace

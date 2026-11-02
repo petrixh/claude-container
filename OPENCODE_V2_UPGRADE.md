@@ -368,14 +368,25 @@ RUN mkdir -p /home/node/.config /home/node/.local/share \
  && chown -R node:node /home/node
 ```
 
-The subdirectories are created by **`entrypoint-opencode.sh`**, not the Dockerfile —
-`/workspace` is a mount point, so anything the image writes there is shadowed the moment
-the bind mount lands. The symlinks are deliberately left dangling in the image and resolve
-on first start:
+The subdirectories are created at runtime, not by the Dockerfile — `/workspace` is a
+mount point, so anything the image writes there is shadowed the moment the bind mount
+lands. The symlinks are deliberately left dangling in the image and resolve on first
+start:
 
 ```bash
 mkdir -p /workspace/.opencode/{config,data,state,cache}
 ```
+
+The entrypoint alone is **not** enough to do this. Dev containers (VS Code and the
+devcontainer CLI) replace the image entrypoint with their own keep-alive command, and so
+does `docker run --entrypoint …`; in both cases the links stay dangling and OpenCode
+crashes on its first write (`ENOENT: … mkdir '~/.local/share/opencode/log'`). So
+`/usr/local/bin/opencode` is a launcher (`opencode-launcher.sh`) that creates any missing
+link target on every launch before it execs the real binary. If a target cannot be created
+(read-only or missing workspace), the launcher replaces that link with a plain directory
+in the container and warns, so OpenCode still starts; that state does not survive a
+rebuild. The entrypoint still runs the same `mkdir`, so the folder exists before anything
+else touches it.
 
 A project that has never run OpenCode therefore gets a working `.opencode` folder
 automatically, with no setup step.
