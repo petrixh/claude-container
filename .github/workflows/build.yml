@@ -155,18 +155,93 @@ jobs:
 
           echo "=== All Vaadin Pro Key tests passed ==="
 
-      # Test OpenCode CLI is installed and runnable
+      # Test the OpenCode CLI is installed, that the entrypoint materialises the
+      # consolidated ./.opencode state folder, and that the V2 background server
+      # starts and stops.
+      #
+      # Runs the OpenCode entrypoint itself rather than /bin/bash, so the directory
+      # creation is exercised rather than simulated. It is named explicitly instead
+      # of using the image default because opencode-dind's default entrypoint starts
+      # dockerd first, which needs --privileged; entrypoint.sh is the OpenCode one in
+      # both variants.
       - name: Test OpenCode installation
         if: matrix.variant == 'opencode' || matrix.variant == 'opencode-dind'
         run: |
           echo "=== Testing OpenCode CLI (${{ matrix.variant }}) ==="
-          docker run --rm --entrypoint /bin/bash \
+          docker run --rm --entrypoint /usr/local/bin/entrypoint.sh \
             -e SKIP_FIREWALL=1 \
-            claude-container:${{ matrix.variant }}-test -c "
-              command -v opencode || { echo 'opencode not found on PATH'; exit 1; }
+            claude-container:${{ matrix.variant }}-test \
+            bash -c '
+              set -e
+              command -v opencode || { echo "opencode not found on PATH"; exit 1; }
               opencode --version
-            "
-          echo "PASS: opencode CLI is installed"
+              case "$(opencode --version)" in
+                *" v2."*) echo "OK: V2 binary" ;;
+                *) echo "WARNING: not a V2 binary - $(opencode --version)" ;;
+              esac
+
+              echo "Checking the consolidated state folder..."
+              for d in config data state cache; do
+                test -d "/workspace/.opencode/$d" \
+                  || { echo "missing /workspace/.opencode/$d"; exit 1; }
+              done
+
+              echo "Checking the XDG directories point into it..."
+              test "$(readlink -f ~/.config/opencode)"      = /workspace/.opencode/config
+              test "$(readlink -f ~/.local/share/opencode)" = /workspace/.opencode/data
+              test "$(readlink -f ~/.local/state/opencode)" = /workspace/.opencode/state
+              test "$(readlink -f ~/.cache/opencode)"       = /workspace/.opencode/cache
+
+              echo "Checking opencode agrees..."
+              opencode debug paths
+              test "$(opencode debug paths | awk "/^db /{print \$2}")" \
+                 = /home/node/.local/share/opencode/opencode.db
+
+              echo "Starting the background server..."
+              opencode service start
+              opencode service status
+              test -f /workspace/.opencode/data/opencode.db \
+                || { echo "database was not created in the state folder"; exit 1; }
+              opencode service stop
+            '
+          echo "PASS: opencode CLI, state folder and background server all work"
+
+      # Test opencode launches when the OpenCode entrypoint never ran. This is how
+      # dev containers start the image (they replace the entrypoint with their own
+      # keep-alive command), and the case the step above cannot see: there the
+      # entrypoint has already created /workspace/.opencode/*. Without it the
+      # baked-in XDG symlinks dangle, and opencode must still start.
+      #
+      # Two cases: a writable workspace, where the launcher creates the state
+      # folder; and a read-only one, where it falls back to in-container dirs.
+      # `opencode debug paths` touches the state directories on startup, so it
+      # fails if they are unusable.
+      - name: Test OpenCode launches without the entrypoint
+        if: matrix.variant == 'opencode' || matrix.variant == 'opencode-dind'
+        run: |
+          echo "=== Testing opencode launch, entrypoint bypassed (${{ matrix.variant }}) ==="
+          check='
+            set -eo pipefail
+            opencode --version 2>&1 | tee /tmp/out
+            opencode debug paths 2>&1 | tee -a /tmp/out
+            if grep -qiE "error|ENOENT" /tmp/out; then
+              echo "opencode printed an error"; exit 1
+            fi
+          '
+
+          echo "--- writable /workspace"
+          docker run --rm --entrypoint /bin/bash -e SKIP_FIREWALL=1 \
+            claude-container:${{ matrix.variant }}-test -c "${check}
+              test -d /workspace/.opencode/data \
+                || { echo \"launcher did not create /workspace/.opencode/data\"; exit 1; }"
+
+          echo "--- read-only /workspace"
+          docker run --rm --entrypoint /bin/bash -e SKIP_FIREWALL=1 \
+            --tmpfs /workspace:ro \
+            claude-container:${{ matrix.variant }}-test -c "${check}
+              test -d ~/.local/share/opencode -a ! -L ~/.local/share/opencode \
+                || { echo \"launcher did not fall back to a local dir\"; exit 1; }"
+          echo "PASS: opencode launches without the entrypoint"
 
       # Test the Docker daemon starts and works inside the DinD variants.
       # Bypasses the DinD entrypoint (which also inits the firewall) and starts
