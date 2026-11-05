@@ -114,6 +114,14 @@ HOOKEOF
     echo "Notification hooks configured for: ${NOTIFICATION_URL}"
 fi
 
+# Start the SSH server if SSH_PUBLIC_KEY is provided
+if [[ -n "${SSH_PUBLIC_KEY:-}" ]]; then
+    if ! /usr/local/bin/setup-ssh.sh; then
+        echo "Warning: SSH server setup failed. Continuing without SSH."
+        echo ""
+    fi
+fi
+
 # Initialize firewall if we have the capability (unless SKIP_FIREWALL is set)
 # This requires NET_ADMIN capability to be set
 if [[ "${SKIP_FIREWALL:-0}" == "1" ]]; then

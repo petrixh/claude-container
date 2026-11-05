@@ -119,6 +119,23 @@ RUN chown -R node:node /usr/local/lib/node_modules \
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/node \
     && chmod 0440 /etc/sudoers.d/node
 
+# Optional SSH server (disabled unless SSH_PUBLIC_KEY is set at runtime, see
+# setup-ssh.sh). Listens on 2222, key-only auth, node user only. Host keys are
+# removed so each container generates its own on first start instead of every
+# container sharing the keys baked into the image.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/ssh/ssh_host_* \
+    && printf '%s\n' \
+        'Port 2222' \
+        'PasswordAuthentication no' \
+        'KbdInteractiveAuthentication no' \
+        'PermitRootLogin no' \
+        'AllowUsers node' \
+        > /etc/ssh/sshd_config.d/container.conf
+COPY setup-ssh.sh /usr/local/bin/setup-ssh.sh
+RUN chmod +x /usr/local/bin/setup-ssh.sh
+
 # Create directories for the node user
 RUN mkdir -p /home/node/.claude /home/node/.config/gh /commandhistory \
     && chown -R node:node /home/node /commandhistory
@@ -143,7 +160,9 @@ RUN echo '\n# Claude Code aliases' >> /home/node/.zshrc \
     && echo '\n# History settings for persistent history' >> /home/node/.zshrc \
     && echo 'HISTFILE=/commandhistory/.zsh_history' >> /home/node/.zshrc \
     && echo 'HISTSIZE=10000' >> /home/node/.zshrc \
-    && echo 'SAVEHIST=10000' >> /home/node/.zshrc
+    && echo 'SAVEHIST=10000' >> /home/node/.zshrc \
+    # SSH logins don't inherit the container env; load the snapshot setup-ssh.sh writes
+    && echo '[[ -n "$SSH_CONNECTION" && -r ~/.container-env ]] && source ~/.container-env' >> /home/node/.zshenv
 
 # ========================================
 # BASE STAGE (Claude Code)
